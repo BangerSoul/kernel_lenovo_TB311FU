@@ -1,0 +1,197 @@
+name: Build Custom Kernel with KernelSU
+
+on:
+  workflow_dispatch:
+    inputs:
+      KERNEL_REPO:
+        description: 'Kernel source Git repository URL:'
+        required: true
+        default: 'https://android.googlesource.com/kernel/common'
+      KERNEL_BRANCH:
+        description: 'Kernel source branch:'
+        required: true
+        default: 'android12-5.10'
+      DEFCONFIG:
+        description: 'Target defconfig:'
+        required: true
+        default: 'gki_defconfig'
+      KERNELSU_MODE:
+        description: 'Root solution to integrate:'
+        required: true
+        type: choice
+        default: 'KernelSU-Next'
+        options:
+          - 'KernelSU-Next'
+          - 'KernelSU'
+          - 'None'
+      USE_CUSTOM_CLANG:
+        description: 'Use AOSP prebuilt Clang (true) or System LLVM (false):'
+        required: true
+        type: choice
+        default: 'true'
+        options:
+          - 'true'
+          - 'false'
+      CLANG_REPO:
+        description: 'Clang toolchain git repository (if USE_CUSTOM_CLANG is true):'
+        required: false
+        default: 'https://github.com/TheBizarreAbhishek/clang-r450784d'
+      BUILD_DTBO:
+        description: 'Build and package DTBO image:'
+        required: true
+        type: choice
+        default: 'true'
+        options:
+          - 'true'
+          - 'false'
+
+jobs:
+  build:
+    name: Build Kernel for Lenovo TB311FU
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Maximize Runner Disk Space
+        run: |
+          echo "=== Disk space before cleanup ==="
+          df -h
+          echo "=== Removing unused preinstalled packages ==="
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+          echo "=== Disk space after cleanup ==="
+          df -h
+
+      - name: Check out Pipeline Repository
+        uses: actions/checkout@v4
+        with:
+          path: kernel_pipeline
+
+      - name: Install Build Dependencies & Cross Compilers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git-core gnupg flex bison build-essential zip curl zlib1g-dev \
+            libc6-dev-i386 libncurses5 libssl-dev libelf-dev python3 \
+            python3-pip rsync lz4 ccache bc cpio \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            clang lld llvm
+
+      - name: Set up Clang Toolchain
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/toolchain"
+          if [ "${{ inputs.USE_CUSTOM_CLANG }}" = "true" ]; then
+            echo "Cloning AOSP Clang toolchain from ${{ inputs.CLANG_REPO }}..."
+            git clone --depth=1 "${{ inputs.CLANG_REPO }}" "$GITHUB_WORKSPACE/toolchain/clang"
+            echo "$GITHUB_WORKSPACE/toolchain/clang/bin" >> $GITHUB_PATH
+          else
+            echo "Using system LLVM / Clang..."
+          fi
+
+      - name: Clone Kernel Source
+        run: |
+          echo "Cloning kernel source (${{ inputs.KERNEL_BRANCH }})..."
+          git clone --depth=1 -b "${{ inputs.KERNEL_BRANCH }}" "${{ inputs.KERNEL_REPO }}" "$GITHUB_WORKSPACE/kernel_src"
+
+      - name: Integrate KernelSU / KernelSU-Next
+        run: |
+          cd "$GITHUB_WORKSPACE/kernel_src"
+          MODE="${{ inputs.KERNELSU_MODE }}"
+
+          if [ "$MODE" = "KernelSU-Next" ]; then
+            echo "Integrating KernelSU-Next..."
+            curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+          elif [ "$MODE" = "KernelSU" ]; then
+            echo "Integrating Official KernelSU..."
+            curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
+          else
+            echo "No root solution selected. Compiling vanilla kernel."
+          fi
+
+      - name: Configure Target Defconfig
+        run: |
+          cd "$GITHUB_WORKSPACE/kernel_src"
+          DEFCONFIG="${{ inputs.DEFCONFIG }}"
+
+          # Enable kprobes & overlayfs required for KernelSU if enabled
+          if [ "${{ inputs.KERNELSU_MODE }}" != "None" ]; then
+            echo "CONFIG_KPROBES=y" >> "arch/arm64/configs/${DEFCONFIG}"
+            echo "CONFIG_HAVE_KPROBES=y" >> "arch/arm64/configs/${DEFCONFIG}"
+            echo "CONFIG_KPROBE_EVENTS=y" >> "arch/arm64/configs/${DEFCONFIG}"
+            echo "CONFIG_OVERLAY_FS=y" >> "arch/arm64/configs/${DEFCONFIG}"
+          fi
+
+          mkdir -p out
+          make O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- "$DEFCONFIG"
+
+      - name: Compile Custom Kernel
+        run: |
+          cd "$GITHUB_WORKSPACE/kernel_src"
+          make -j$(nproc --all) O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- Image.gz
+
+          if [ "${{ inputs.BUILD_DTBO }}" = "true" ]; then
+            make -j$(nproc --all) O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- dtbo.img || true
+          fi
+
+      - name: Package Flashable AnyKernel3 Zip
+        id: package
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          KSU_TAG="${{ inputs.KERNELSU_MODE }}"
+
+          # Clone standard AnyKernel3 base template
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3 "$GITHUB_WORKSPACE/ak3"
+          rm -rf "$GITHUB_WORKSPACE/ak3/.git"
+
+          # Overlay Lenovo TB311FU anykernel.sh
+          cp "$GITHUB_WORKSPACE/kernel_pipeline/anykernel/anykernel.sh" "$GITHUB_WORKSPACE/ak3/anykernel.sh"
+
+          # Copy compiled kernel Image
+          if [ -f "$GITHUB_WORKSPACE/kernel_src/out/arch/arm64/boot/Image.gz" ]; then
+            cp "$GITHUB_WORKSPACE/kernel_src/out/arch/arm64/boot/Image.gz" "$GITHUB_WORKSPACE/ak3/Image.gz"
+            cp "$GITHUB_WORKSPACE/kernel_src/out/arch/arm64/boot/Image.gz" "$GITHUB_WORKSPACE/artifacts/Image.gz"
+          elif [ -f "$GITHUB_WORKSPACE/kernel_src/out/arch/arm64/boot/Image" ]; then
+            cp "$GITHUB_WORKSPACE/kernel_src/out/arch/arm64/boot/Image" "$GITHUB_WORKSPACE/ak3/Image"
+            cp "$GITHUB_WORKSPACE/kernel_src/out/arch/arm64/boot/Image" "$GITHUB_WORKSPACE/artifacts/Image"
+          else
+            echo "Error: Kernel binary not generated in out directory!"
+            exit 1
+          fi
+
+          # Copy DTBO if built
+          if [ -f "$GITHUB_WORKSPACE/kernel_src/out/arch/arm64/boot/dtbo.img" ]; then
+            cp "$GITHUB_WORKSPACE/kernel_src/out/arch/arm64/boot/dtbo.img" "$GITHUB_WORKSPACE/ak3/dtbo.img"
+            cp "$GITHUB_WORKSPACE/kernel_src/out/arch/arm64/boot/dtbo.img" "$GITHUB_WORKSPACE/artifacts/dtbo.img"
+          fi
+
+          # Zip AnyKernel3 package
+          cd "$GITHUB_WORKSPACE/ak3"
+          ZIP_NAME="AnyKernel3-TB311FU-${KSU_TAG}-${TIMESTAMP}.zip"
+          zip -r9 "$GITHUB_WORKSPACE/artifacts/$ZIP_NAME" * -x .git README.md
+
+          cd "$GITHUB_WORKSPACE/artifacts"
+          sha256sum * > SHA256SUMS.txt
+          echo "TIMESTAMP=$TIMESTAMP" >> $GITHUB_OUTPUT
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_OUTPUT
+          ls -la "$GITHUB_WORKSPACE/artifacts"
+
+      - name: Upload Run Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel-TB311FU-${{ steps.package.outputs.TIMESTAMP }}
+          path: artifacts/*
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        with:
+          tag_name: kernel-release-${{ steps.package.outputs.TIMESTAMP }}
+          name: "Custom Kernel with ${{ inputs.KERNELSU_MODE }} for Lenovo Tab M11 (TB311FU) - ${{ steps.package.outputs.TIMESTAMP }}"
+          draft: false
+          prerelease: false
+          files: artifacts/*
