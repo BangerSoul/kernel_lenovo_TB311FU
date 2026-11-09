@@ -65,6 +65,12 @@ jobs:
           sudo docker image prune --all --force >/dev/null 2>&1 || true
           echo "=== Disk space after cleanup ==="
           df -h
+          echo "=== Setting up 12GB Swap to prevent OOM killer during LTO link ==="
+          sudo fallocate -l 12G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=12288
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
 
       - name: Check out Pipeline Repository
         uses: actions/checkout@v4
@@ -124,6 +130,9 @@ jobs:
             echo "CONFIG_KPROBE_EVENTS=y" >> "arch/arm64/configs/${DEFCONFIG}"
             echo "CONFIG_OVERLAY_FS=y" >> "arch/arm64/configs/${DEFCONFIG}"
           fi
+
+          # Switch to ThinLTO to dramatically reduce memory footprint during LTO linking
+          sed -i 's/CONFIG_LTO_CLANG_FULL=y/CONFIG_LTO_CLANG_THIN=y/' "arch/arm64/configs/${DEFCONFIG}" || true
 
           mkdir -p out
           make O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- "$DEFCONFIG"
