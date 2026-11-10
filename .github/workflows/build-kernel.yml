@@ -66,10 +66,14 @@ jobs:
           echo "=== Disk space after cleanup ==="
           df -h
           echo "=== Setting up 12GB Swap to prevent OOM killer during LTO link ==="
-          sudo fallocate -l 12G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=12288
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          # Disable any pre-existing swapfile on the runner (GitHub runners pre-mount /swapfile)
+          sudo swapoff /swapfile 2>/dev/null || true
+          sudo rm -f /swapfile 2>/dev/null || true
+          # Allocate fresh swap in /mnt (larger partition) to avoid EBUSY on /swapfile
+          sudo fallocate -l 12G /mnt/swapfile || sudo dd if=/dev/zero of=/mnt/swapfile bs=1M count=12288
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
           free -h
 
       - name: Check out Pipeline Repository
