@@ -19,14 +19,21 @@ supported.patchlevels=
 '; }
 
 ### AnyKernel setup
-# begin properties
-. /tmp/anykernel/tools/ak3-core.sh;
+block=boot;
+is_slot_device=auto;
+ramdisk_compression=auto;
+
+# import functions/variables and setup environment
+if [ -f "$AKHOME/tools/ak3-core.sh" ]; then
+  . "$AKHOME/tools/ak3-core.sh";
+elif [ -f "./tools/ak3-core.sh" ]; then
+  . ./tools/ak3-core.sh;
+elif [ -f "/tmp/anykernel/tools/ak3-core.sh" ]; then
+  . /tmp/anykernel/tools/ak3-core.sh;
+fi;
 
 ### GKI / Boot Header v4 Configuration
 split_boot;
 
 # Repack kernel image
 flash_boot;
-
-# Repack DTBO partition if present
-flash_dtbo;
