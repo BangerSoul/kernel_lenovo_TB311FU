@@ -10,7 +10,7 @@ on:
       KERNEL_BRANCH:
         description: 'Kernel source branch:'
         required: true
-        default: 'android12-5.10'
+        default: 'android15-6.6'
       DEFCONFIG:
         description: 'Target defconfig:'
         required: true
@@ -33,9 +33,9 @@ on:
           - 'true'
           - 'false'
       CLANG_REPO:
-        description: 'Clang toolchain git repository (if USE_CUSTOM_CLANG is true):'
+        description: 'Clang toolchain repository or "aosp" for official clang-r510928:'
         required: false
-        default: 'https://github.com/TheBizarreAbhishek/clang-r450784d'
+        default: 'aosp'
       BUILD_DTBO:
         description: 'Build and package DTBO image:'
         required: true
@@ -95,9 +95,17 @@ jobs:
         run: |
           mkdir -p "$GITHUB_WORKSPACE/toolchain"
           if [ "${{ inputs.USE_CUSTOM_CLANG }}" = "true" ]; then
-            echo "Cloning AOSP Clang toolchain from ${{ inputs.CLANG_REPO }}..."
-            git clone --depth=1 "${{ inputs.CLANG_REPO }}" "$GITHUB_WORKSPACE/toolchain/clang"
-            echo "$GITHUB_WORKSPACE/toolchain/clang/bin" >> $GITHUB_PATH
+            if [ -n "${{ inputs.CLANG_REPO }}" ] && [ "${{ inputs.CLANG_REPO }}" != "aosp" ] && [[ "${{ inputs.CLANG_REPO }}" != *"clang-r510928"* ]]; then
+              echo "Cloning custom Clang toolchain from ${{ inputs.CLANG_REPO }}..."
+              git clone --depth=1 "${{ inputs.CLANG_REPO }}" "$GITHUB_WORKSPACE/toolchain/clang"
+              echo "$GITHUB_WORKSPACE/toolchain/clang/bin" >> $GITHUB_PATH
+            else
+              echo "Cloning official AOSP Clang toolchain (clang-r510928) for Android 15 / 6.6..."
+              git clone --depth=1 -b android15-release --filter=blob:none --sparse https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 "$GITHUB_WORKSPACE/toolchain/clang_repo"
+              cd "$GITHUB_WORKSPACE/toolchain/clang_repo"
+              git sparse-checkout set clang-r510928
+              echo "$GITHUB_WORKSPACE/toolchain/clang_repo/clang-r510928/bin" >> $GITHUB_PATH
+            fi
           else
             echo "Using system LLVM / Clang..."
           fi
@@ -135,7 +143,7 @@ jobs:
             echo "CONFIG_OVERLAY_FS=y" >> "arch/arm64/configs/${DEFCONFIG}"
           fi
 
-          # Switch to ThinLTO to dramatically reduce memory footprint during LTO linking
+          # Switch to ThinLTO to dramatically reduce memory footprint during LTO linking if full LTO is set
           sed -i 's/CONFIG_LTO_CLANG_FULL=y/CONFIG_LTO_CLANG_THIN=y/' "arch/arm64/configs/${DEFCONFIG}" || true
 
           mkdir -p out
@@ -144,7 +152,12 @@ jobs:
       - name: Compile Custom Kernel
         run: |
           cd "$GITHUB_WORKSPACE/kernel_src"
-          make -j$(nproc --all) O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- Image.gz
+          make -j$(nproc --all) O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- Image
+
+          # Compress Image to Image.gz
+          if [ -f "out/arch/arm64/boot/Image" ]; then
+            gzip -n -k -9 "out/arch/arm64/boot/Image"
+          fi
 
           if [ "${{ inputs.BUILD_DTBO }}" = "true" ]; then
             make -j$(nproc --all) O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- dtbo.img || true
@@ -164,14 +177,17 @@ jobs:
           # Overlay Lenovo TB311FU anykernel.sh
           cp "$GITHUB_WORKSPACE/kernel_pipeline/anykernel/anykernel.sh" "$GITHUB_WORKSPACE/ak3/anykernel.sh"
 
-          # Copy compiled kernel Image
+          # Copy compiled kernel Images
+          if [ -f "$GITHUB_WORKSPACE/kernel_src/out/arch/arm64/boot/Image" ]; then
+            cp "$GITHUB_WORKSPACE/kernel_src/out/arch/arm64/boot/Image" "$GITHUB_WORKSPACE/ak3/Image"
+            cp "$GITHUB_WORKSPACE/kernel_src/out/arch/arm64/boot/Image" "$GITHUB_WORKSPACE/artifacts/Image"
+          fi
           if [ -f "$GITHUB_WORKSPACE/kernel_src/out/arch/arm64/boot/Image.gz" ]; then
             cp "$GITHUB_WORKSPACE/kernel_src/out/arch/arm64/boot/Image.gz" "$GITHUB_WORKSPACE/ak3/Image.gz"
             cp "$GITHUB_WORKSPACE/kernel_src/out/arch/arm64/boot/Image.gz" "$GITHUB_WORKSPACE/artifacts/Image.gz"
-          elif [ -f "$GITHUB_WORKSPACE/kernel_src/out/arch/arm64/boot/Image" ]; then
-            cp "$GITHUB_WORKSPACE/kernel_src/out/arch/arm64/boot/Image" "$GITHUB_WORKSPACE/ak3/Image"
-            cp "$GITHUB_WORKSPACE/kernel_src/out/arch/arm64/boot/Image" "$GITHUB_WORKSPACE/artifacts/Image"
-          else
+          fi
+
+          if [ ! -f "$GITHUB_WORKSPACE/artifacts/Image" ] && [ ! -f "$GITHUB_WORKSPACE/artifacts/Image.gz" ]; then
             echo "Error: Kernel binary not generated in out directory!"
             exit 1
           fi
