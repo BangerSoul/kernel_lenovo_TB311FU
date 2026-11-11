@@ -47,7 +47,7 @@ on:
 
 jobs:
   build:
-    name: Build PoplarKernel v1.0 for Lenovo Tab M11 (TB311FU)
+    name: Build PoplarKernel v1.1 for Lenovo Tab M11 (TB311FU)
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -163,8 +163,16 @@ jobs:
             echo "CONFIG_OVERLAY_FS=y" >> "arch/arm64/configs/${DEFCONFIG}"
           fi
 
-          # Built-in RFKILL for direct Wi-Fi stack resolution without external signed modules
+          # Built-in Wi-Fi Subsystem (RFKILL, CFG80211, MAC80211)
+          # Solves MediaTek wlan_drv_gen4m_6768 cfg80211_* symbol dependency and prevents WMT timeout
+          sed -i 's/CONFIG_RFKILL=m/CONFIG_RFKILL=y/' "arch/arm64/configs/${DEFCONFIG}" || true
+          sed -i 's/CONFIG_CFG80211=m/CONFIG_CFG80211=y/' "arch/arm64/configs/${DEFCONFIG}" || true
+          sed -i 's/CONFIG_MAC80211=m/CONFIG_MAC80211=y/' "arch/arm64/configs/${DEFCONFIG}" || true
           echo "CONFIG_RFKILL=y" >> "arch/arm64/configs/${DEFCONFIG}"
+          echo "CONFIG_CFG80211=y" >> "arch/arm64/configs/${DEFCONFIG}"
+          echo "CONFIG_NL80211_TESTMODE=y" >> "arch/arm64/configs/${DEFCONFIG}"
+          echo "CONFIG_CFG80211_DEFAULT_PS=y" >> "arch/arm64/configs/${DEFCONFIG}"
+          echo "CONFIG_MAC80211=y" >> "arch/arm64/configs/${DEFCONFIG}"
 
           # Enable force module loading
           echo "CONFIG_MODULE_FORCE_LOAD=y" >> "arch/arm64/configs/${DEFCONFIG}"
@@ -225,7 +233,7 @@ jobs:
 
           # Zip AnyKernel3 package
           cd "$GITHUB_WORKSPACE/ak3"
-          ZIP_NAME="PoplarKernel-v1.0-TB311FU-${KSU_TAG}-${TIMESTAMP}.zip"
+          ZIP_NAME="PoplarKernel-v1.1-TB311FU-${KSU_TAG}-${TIMESTAMP}.zip"
           zip -r9 "$GITHUB_WORKSPACE/artifacts/$ZIP_NAME" * -x .git README.md
 
           cd "$GITHUB_WORKSPACE/artifacts"
@@ -244,10 +252,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         with:
-          tag_name: PoplarKernel-v1.0-${{ steps.package.outputs.TIMESTAMP }}
-          name: "PoplarKernel v1.0 with ${{ inputs.KERNELSU_MODE }} for Lenovo Tab M11 (TB311FU)"
+          tag_name: PoplarKernel-v1.1-${{ steps.package.outputs.TIMESTAMP }}
+          name: "PoplarKernel v1.1 with ${{ inputs.KERNELSU_MODE }} for Lenovo Tab M11 (TB311FU)"
           body: |
-            # 🌲 PoplarKernel v1.0 for Lenovo Tab M11 (TB311FU)
+            # 🌲 PoplarKernel v1.1 for Lenovo Tab M11 (TB311FU)
             **The First Official Custom Kernel for Lenovo Tab M11 (`TB311FU` / `poplar`)!**
 
             ---
@@ -257,9 +265,9 @@ jobs:
             - **Target Device:** Lenovo Tab M11 (`TB311FU` / `poplar`)
             - **SoC:** MediaTek MT8786 / MT6769 (Helio G88)
             - **Linux Kernel Base:** Android 15 GKI Linux `6.6.82` (`android15-6.6-2025-04_r18`)
-            - **Root Solution:** Integrated **KernelSU-Next** (Next-generation Kernel-Level Root)
-            - **Wi-Fi & Connectivity Fix:** Built-in `CONFIG_RFKILL=y` and module signature bypass for MediaTek WMT & `wlan_drv_gen4m_6768.ko`
-            - **Full Vendor Module Compatibility:** Unconditional symbol version & CRC match for all 102 hardware SoC modules in `vendor_boot` and `/vendor_dlkm`
+            - **Root Solution:** Integrated **KernelSU-Next** (Protocol v6, SELinux Enforcing, full superuser authority)
+            - **Wi-Fi & Connectivity Fix:** Built-in `CONFIG_CFG80211=y`, `CONFIG_RFKILL=y`, and `CONFIG_MAC80211=y` for instant automatic resolution of MediaTek `wlan_drv_gen4m_6768.ko` without missing symbols or WMT timeouts
+            - **Full Vendor Module Compatibility:** Module signature bypass and symbol protection bypass for all 102 hardware SoC modules in `vendor_boot` and `/vendor_dlkm`
             - **Toolchain:** Compiled with official Google AOSP Clang 18 (`clang-r510928`) with ThinLTO
             - **Packaging:** Native AnyKernel3 with gzip compression (`Image.gz`), verified to fit perfectly within the 32 MB `boot` partition
 
