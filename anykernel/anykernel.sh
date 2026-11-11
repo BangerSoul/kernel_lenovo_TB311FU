@@ -19,9 +19,13 @@ supported.patchlevels=
 '; }
 
 ### AnyKernel setup
+# Both uppercase and lowercase for maximum compatibility
 block=boot;
+BLOCK=boot;
 is_slot_device=auto;
+IS_SLOT_DEVICE=auto;
 ramdisk_compression=auto;
+RAMDISK_COMPRESSION=auto;
 
 # import functions/variables and setup environment
 if [ -f "$AKHOME/tools/ak3-core.sh" ]; then
