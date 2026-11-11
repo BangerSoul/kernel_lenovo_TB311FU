@@ -240,13 +240,14 @@ jobs:
 
       - name: Upload Run Artifacts
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: PoplarKernel-TB311FU-${{ steps.package.outputs.TIMESTAMP }}
           path: artifacts/*
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        if: (steps.package.outcome == 'success') && (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch')
         with:
           tag_name: PoplarKernel-v1.2-${{ steps.package.outputs.TIMESTAMP }}
           name: "PoplarKernel v1.2 with ${{ inputs.KERNELSU_MODE }} for Lenovo Tab M11 (TB311FU)"
