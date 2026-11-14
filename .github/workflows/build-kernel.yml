@@ -405,13 +405,19 @@ jobs:
           # Force module loading compatibility
           echo "CONFIG_MODULE_FORCE_LOAD=y" >> "arch/arm64/configs/${HALIUM_DEFCONFIG}"
 
-          # Explicitly assert AppArmor is enabled (non-negotiable for Ubuntu Touch)
           grep -q "CONFIG_SECURITY_APPARMOR=y" "arch/arm64/configs/${HALIUM_DEFCONFIG}" || \
             echo "CONFIG_SECURITY_APPARMOR=y" >> "arch/arm64/configs/${HALIUM_DEFCONFIG}"
           grep -q "CONFIG_DEFAULT_SECURITY_APPARMOR=y" "arch/arm64/configs/${HALIUM_DEFCONFIG}" || \
             echo "CONFIG_DEFAULT_SECURITY_APPARMOR=y" >> "arch/arm64/configs/${HALIUM_DEFCONFIG}"
+          # Disable symbol trimming so out-of-tree vendor modules and Halium retain all symbols,
+          # and eliminate build failure on missing abi_symbollist.raw
+          sed -i '/CONFIG_TRIM_UNUSED_KSYMS/d' "arch/arm64/configs/${HALIUM_DEFCONFIG}" || true
+          sed -i '/CONFIG_UNUSED_KSYMS_WHITELIST/d' "arch/arm64/configs/${HALIUM_DEFCONFIG}" || true
+          echo "# CONFIG_TRIM_UNUSED_KSYMS is not set" >> "arch/arm64/configs/${HALIUM_DEFCONFIG}"
+          touch abi_symbollist.raw || true
 
           mkdir -p out
+          touch out/abi_symbollist.raw || true
           make O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 \
             CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
             "${HALIUM_DEFCONFIG}"
