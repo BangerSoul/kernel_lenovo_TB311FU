@@ -280,3 +280,248 @@ jobs:
           draft: false
           prerelease: false
           files: artifacts/*
+
+  # ---------------------------------------------------------------------------
+  # R1: Halium Ubuntu Touch Build Job
+  # Builds the GKI kernel with halium_tb311fu_defconfig for Ubuntu Touch.
+  # Runs in parallel with the existing 'build' job.
+  # ---------------------------------------------------------------------------
+  build-halium:
+    name: Build Halium Kernel for Ubuntu Touch (TB311FU)
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    env:
+      # Halium Ubuntu Touch: AppArmor is used for confinement — no KernelSU hooks.
+      KERNELSU_MODE: None
+      HALIUM_DEFCONFIG: halium_tb311fu_defconfig
+
+    steps:
+      - name: Maximize Runner Disk Space
+        run: |
+          echo "=== Disk space before cleanup ==="
+          df -h
+          echo "=== Removing unused preinstalled packages ==="
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+          echo "=== Setting up 12GB Swap to prevent OOM killer during LTO link ==="
+          sudo swapoff /swapfile 2>/dev/null || true
+          sudo rm -f /swapfile 2>/dev/null || true
+          sudo fallocate -l 12G /mnt/swapfile || sudo dd if=/dev/zero of=/mnt/swapfile bs=1M count=12288
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          free -h
+
+      - name: Check out Pipeline Repository
+        uses: actions/checkout@v4
+        with:
+          path: kernel_pipeline
+
+      - name: Install Build Dependencies & Cross Compilers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git-core gnupg flex bison build-essential zip curl zlib1g-dev \
+            libc6-dev-i386 libncurses5 libssl-dev libelf-dev python3 \
+            python3-pip rsync lz4 ccache bc cpio \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            clang lld llvm
+
+      - name: Set up AOSP Clang r510928 Toolchain
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/toolchain"
+          echo "Cloning official AOSP Clang toolchain (clang-r510928) for Android 15 / 6.6..."
+          git clone --depth=1 -b android15-release --filter=blob:none --sparse \
+            https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
+            "$GITHUB_WORKSPACE/toolchain/clang_repo"
+          cd "$GITHUB_WORKSPACE/toolchain/clang_repo"
+          git sparse-checkout set clang-r510928
+          echo "$GITHUB_WORKSPACE/toolchain/clang_repo/clang-r510928/bin" >> $GITHUB_PATH
+
+      - name: Clone Kernel Source
+        run: |
+          echo "Cloning kernel source (${{ inputs.KERNEL_BRANCH }}) for Halium build..."
+          git clone --depth=1 -b "${{ inputs.KERNEL_BRANCH }}" "${{ inputs.KERNEL_REPO }}" \
+            "$GITHUB_WORKSPACE/kernel_src_halium"
+
+      - name: Install Halium Defconfig into Kernel Source Tree
+        run: |
+          # Copy the authoritative halium_tb311fu_defconfig from the pipeline repo
+          # into the kernel source arch/arm64/configs/ directory.
+          DEFCONFIG_DEST="$GITHUB_WORKSPACE/kernel_src_halium/arch/arm64/configs/${HALIUM_DEFCONFIG}"
+
+          if [ -f "$GITHUB_WORKSPACE/kernel_pipeline/halium_tb311fu_defconfig" ]; then
+            cp "$GITHUB_WORKSPACE/kernel_pipeline/halium_tb311fu_defconfig" "$DEFCONFIG_DEST"
+            echo "Installed halium_tb311fu_defconfig -> arch/arm64/configs/${HALIUM_DEFCONFIG}"
+          elif [ -f "$GITHUB_WORKSPACE/kernel_pipeline/tb311fu_defconfig" ]; then
+            cp "$GITHUB_WORKSPACE/kernel_pipeline/tb311fu_defconfig" "$DEFCONFIG_DEST"
+            echo "Installed tb311fu_defconfig -> arch/arm64/configs/${HALIUM_DEFCONFIG}"
+          else
+            echo "ERROR: halium_tb311fu_defconfig not found in pipeline repository!"
+            exit 1
+          fi
+
+      - name: Patch KMI, Module Compatibility & Signature Verification Bypass
+        run: |
+          cd "$GITHUB_WORKSPACE/kernel_src_halium"
+          echo "=== Setting matching KMI localversion ==="
+          echo "-android15-8-g076ac12bde16" > localversion
+
+          echo "=== Patching kernel/module/version.c (Bypass CRC mismatches) ==="
+          sed -i '/int check_version(/,/^{/ {
+            /^{/ a\\treturn 1;
+          }' kernel/module/version.c
+
+          echo "=== Patching kernel/module/main.c (Bypass vermagic & GKI protected exports) ==="
+          sed -i 's/return strcmp(amagic, bmagic) == 0;/return 1;/' kernel/module/main.c
+          sed -i 's/is_vendor_module = !mod->sig_ok;/is_vendor_module = 0;/' kernel/module/main.c
+
+          echo "=== Patching kernel/module/signing.c (Bypass module signature checks) ==="
+          sed -i '/int mod_verify_sig(/,/^{/ {
+            /^{/ a\\tinfo->sig_ok = true;\n\treturn 0;
+          }' kernel/module/signing.c
+
+          echo "=== Module patches applied ==="
+          git diff kernel/module/ || true
+
+      - name: Configure Halium Defconfig (KernelSU=None, ThinLTO, RFKILL=m enforced)
+        run: |
+          cd "$GITHUB_WORKSPACE/kernel_src_halium"
+
+          # Halium Ubuntu Touch: NO KernelSU integration (AppArmor confinement is used instead)
+          echo "KernelSU disabled for Halium Ubuntu Touch build — AppArmor enforced."
+
+          # Enforce CONFIG_RFKILL=m (stock modules.dep compatibility)
+          sed -i 's/CONFIG_RFKILL=y/CONFIG_RFKILL=m/' "arch/arm64/configs/${HALIUM_DEFCONFIG}" || true
+
+          # Switch to ThinLTO to reduce memory footprint during LTO linking
+          sed -i 's/CONFIG_LTO_CLANG_FULL=y/CONFIG_LTO_CLANG_THIN=y/' "arch/arm64/configs/${HALIUM_DEFCONFIG}" || true
+
+          # Force module loading compatibility
+          echo "CONFIG_MODULE_FORCE_LOAD=y" >> "arch/arm64/configs/${HALIUM_DEFCONFIG}"
+
+          # Explicitly assert AppArmor is enabled (non-negotiable for Ubuntu Touch)
+          grep -q "CONFIG_SECURITY_APPARMOR=y" "arch/arm64/configs/${HALIUM_DEFCONFIG}" || \
+            echo "CONFIG_SECURITY_APPARMOR=y" >> "arch/arm64/configs/${HALIUM_DEFCONFIG}"
+          grep -q "CONFIG_DEFAULT_SECURITY_APPARMOR=y" "arch/arm64/configs/${HALIUM_DEFCONFIG}" || \
+            echo "CONFIG_DEFAULT_SECURITY_APPARMOR=y" >> "arch/arm64/configs/${HALIUM_DEFCONFIG}"
+
+          mkdir -p out
+          make O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
+            "${HALIUM_DEFCONFIG}"
+
+          # Post-configure verification: assert critical configs in .config
+          echo "=== Post-configure .config assertions ==="
+          grep "CONFIG_SECURITY_APPARMOR=y" out/.config || \
+            { echo "FATAL: CONFIG_SECURITY_APPARMOR=y missing from .config!"; exit 1; }
+          grep "CONFIG_RFKILL=m" out/.config || \
+            { echo "FATAL: CONFIG_RFKILL=m missing from .config!"; exit 1; }
+          echo "CONFIG assertions passed: AppArmor=y, RFKILL=m"
+
+      - name: Compile Halium Kernel (Image + Image.gz + DTBO)
+        run: |
+          cd "$GITHUB_WORKSPACE/kernel_src_halium"
+          make -j$(nproc --all) O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- Image
+
+          # Compress Image -> Image.gz for Boot Header v4 packaging
+          if [ -f "out/arch/arm64/boot/Image" ]; then
+            gzip -n -k -9 "out/arch/arm64/boot/Image"
+            echo "Image.gz compressed successfully."
+          else
+            echo "ERROR: Kernel Image not produced!"
+            exit 1
+          fi
+
+          # Build DTBO overlay image if applicable
+          make -j$(nproc --all) O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
+            dtbo.img 2>/dev/null || echo "[INFO] No dtbo.img target — skipping."
+
+      - name: Collect Halium Kernel Artifacts
+        id: halium_package
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/halium-artifacts"
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+
+          # Required: Image.gz
+          cp "$GITHUB_WORKSPACE/kernel_src_halium/out/arch/arm64/boot/Image.gz" \
+             "$GITHUB_WORKSPACE/halium-artifacts/Image.gz"
+
+          # Required: System.map for symbol debugging
+          cp "$GITHUB_WORKSPACE/kernel_src_halium/out/System.map" \
+             "$GITHUB_WORKSPACE/halium-artifacts/System.map" 2>/dev/null || \
+          cp "$GITHUB_WORKSPACE/kernel_src_halium/System.map" \
+             "$GITHUB_WORKSPACE/halium-artifacts/System.map" 2>/dev/null || \
+            echo "[WARN] System.map not found — skipping."
+
+          # Optional: dtbo.img
+          if [ -f "$GITHUB_WORKSPACE/kernel_src_halium/out/arch/arm64/boot/dtbo.img" ]; then
+            cp "$GITHUB_WORKSPACE/kernel_src_halium/out/arch/arm64/boot/dtbo.img" \
+               "$GITHUB_WORKSPACE/halium-artifacts/dtbo.img"
+            echo "dtbo.img included."
+          fi
+
+          # Audit: .config for transparency & reproducibility
+          cp "$GITHUB_WORKSPACE/kernel_src_halium/out/.config" \
+             "$GITHUB_WORKSPACE/halium-artifacts/halium_tb311fu.config"
+
+          # Final .config assertions before release
+          grep "CONFIG_SECURITY_APPARMOR=y" "$GITHUB_WORKSPACE/halium-artifacts/halium_tb311fu.config" || \
+            { echo "FATAL: CONFIG_SECURITY_APPARMOR=y absent from released .config!"; exit 1; }
+          grep "CONFIG_RFKILL=m" "$GITHUB_WORKSPACE/halium-artifacts/halium_tb311fu.config" || \
+            { echo "FATAL: CONFIG_RFKILL=m absent from released .config!"; exit 1; }
+
+          cd "$GITHUB_WORKSPACE/halium-artifacts"
+          sha256sum * > SHA256SUMS.txt
+          echo "TIMESTAMP=$TIMESTAMP" >> $GITHUB_OUTPUT
+          ls -la
+
+      - name: Upload Halium Kernel Artifacts (Actions Run)
+        uses: actions/upload-artifact@v4
+        with:
+          name: halium-kernel-artifacts-${{ steps.halium_package.outputs.TIMESTAMP }}
+          path: halium-artifacts/*
+
+      - name: Create Halium Kernel GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: steps.halium_package.outcome == 'success' && (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch')
+        with:
+          tag_name: halium-kernel-${{ steps.halium_package.outputs.TIMESTAMP }}
+          name: "Halium Kernel for Ubuntu Touch — Lenovo Tab M11 (TB311FU) [${{ steps.halium_package.outputs.TIMESTAMP }}]"
+          body: |
+            # 🐧 Halium Ubuntu Touch Kernel for Lenovo Tab M11 (TB311FU)
+
+            GKI Linux 6.6 kernel built with `halium_tb311fu_defconfig` for Ubuntu Touch / UBports deployment.
+
+            ---
+
+            ### Artifacts
+            | File | Description |
+            |------|-------------|
+            | `Image.gz` | Compressed kernel — use with `package_halium_boot.py` to build `halium-boot.img` |
+            | `System.map` | Kernel symbol map for crash debugging |
+            | `dtbo.img` | Device Tree Blob Overlay (if produced) |
+            | `halium_tb311fu.config` | Full kernel `.config` for audit and reproducibility |
+            | `SHA256SUMS.txt` | SHA-256 checksums for all artifacts |
+
+            ### Security Configuration
+            - **AppArmor:** `CONFIG_SECURITY_APPARMOR=y` ✅ (required for Ubuntu Touch click confinement)
+            - **Wi-Fi (RFKILL):** `CONFIG_RFKILL=m` ✅ (preserves stock modules.dep compatibility)
+            - **KernelSU:** Disabled ✅ (Ubuntu Touch uses AppArmor, not root hooks)
+            - **ThinLTO:** Enabled for memory-efficient linking
+
+            ### Usage
+            ```bash
+            python package_halium_boot.py --kernel Image.gz --stock-boot stock_boot.img -o halium-boot.img
+            python flash_ubuntu_touch.py --local-kernel Image.gz
+            ```
+          draft: false
+          prerelease: false
+          files: halium-artifacts/*
