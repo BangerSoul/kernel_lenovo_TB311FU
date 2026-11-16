@@ -137,19 +137,19 @@ jobs:
 
           echo "=== Patching drivers/video/backlight/ (Enforce floor raw PWM >= 48) ==="
           python3 -c '
-with open("drivers/video/backlight/backlight.c", "r") as f:
-    c = f.read()
-if "brightness < 48" not in c:
-    c = c.replace("int rc = -ENXIO;", "if (brightness > 0 && brightness < 48) brightness = 48;\n\tint rc = -ENXIO;", 1)
-    with open("drivers/video/backlight/backlight.c", "w") as f:
-        f.write(c)
-with open("drivers/video/backlight/pwm_bl.c", "r") as f:
-    p = f.read()
-if "brightness < 48" not in p:
-    p = p.replace("int brightness = backlight_get_effective_brightness(bd);", "int brightness = backlight_get_effective_brightness(bd);\n\tif (brightness > 0 && brightness < 48) brightness = 48;", 1)
-    with open("drivers/video/backlight/pwm_bl.c", "w") as f:
-        f.write(p)
-'
+          with open("drivers/video/backlight/backlight.c", "r") as f:
+              c = f.read()
+          if "brightness < 48" not in c:
+              c = c.replace("int rc = -ENXIO;", "if (brightness > 0 && brightness < 48) brightness = 48;\n\tint rc = -ENXIO;", 1)
+              with open("drivers/video/backlight/backlight.c", "w") as f:
+                  f.write(c)
+          with open("drivers/video/backlight/pwm_bl.c", "r") as f:
+              p = f.read()
+          if "brightness < 48" not in p:
+              p = p.replace("int brightness = backlight_get_effective_brightness(bd);", "int brightness = backlight_get_effective_brightness(bd);\n\tif (brightness > 0 && brightness < 48) brightness = 48;", 1)
+              with open("drivers/video/backlight/pwm_bl.c", "w") as f:
+                  f.write(p)
+          '
           echo "=== Backlight driver patches applied successfully ==="
           git diff drivers/video/backlight/ || true
 
@@ -425,19 +425,19 @@ if "brightness < 48" not in p:
 
           echo "=== Patching drivers/video/backlight/ (Enforce floor raw PWM >= 48) ==="
           python3 -c '
-with open("drivers/video/backlight/backlight.c", "r") as f:
-    c = f.read()
-if "brightness < 48" not in c:
-    c = c.replace("int rc = -ENXIO;", "if (brightness > 0 && brightness < 48) brightness = 48;\n\tint rc = -ENXIO;", 1)
-    with open("drivers/video/backlight/backlight.c", "w") as f:
-        f.write(c)
-with open("drivers/video/backlight/pwm_bl.c", "r") as f:
-    p = f.read()
-if "brightness < 48" not in p:
-    p = p.replace("int brightness = backlight_get_effective_brightness(bd);", "int brightness = backlight_get_effective_brightness(bd);\n\tif (brightness > 0 && brightness < 48) brightness = 48;", 1)
-    with open("drivers/video/backlight/pwm_bl.c", "w") as f:
-        f.write(p)
-'
+          with open("drivers/video/backlight/backlight.c", "r") as f:
+              c = f.read()
+          if "brightness < 48" not in c:
+              c = c.replace("int rc = -ENXIO;", "if (brightness > 0 && brightness < 48) brightness = 48;\n\tint rc = -ENXIO;", 1)
+              with open("drivers/video/backlight/backlight.c", "w") as f:
+                  f.write(c)
+          with open("drivers/video/backlight/pwm_bl.c", "r") as f:
+              p = f.read()
+          if "brightness < 48" not in p:
+              p = p.replace("int brightness = backlight_get_effective_brightness(bd);", "int brightness = backlight_get_effective_brightness(bd);\n\tif (brightness > 0 && brightness < 48) brightness = 48;", 1)
+              with open("drivers/video/backlight/pwm_bl.c", "w") as f:
+                  f.write(p)
+          '
           echo "=== Backlight driver patches applied successfully ==="
           git diff drivers/video/backlight/ || true
 
