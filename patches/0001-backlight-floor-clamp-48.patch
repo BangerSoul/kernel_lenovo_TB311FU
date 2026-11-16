@@ -1,0 +1,52 @@
+From: BangerSoul <bangersoul@antigravity.local>
+Date: Mon, 16 Nov 2026 06:30:00 +0000
+Subject: [PATCH] drivers/video/backlight: Clamp minimum hardware PWM duty cycle floor to >= 48
+
+On Lenovo Tab M11 (TB311FU / poplar, MediaTek MT8786 / Helio G88), the BOE 11.0"
+WUXGA IPS LCD panel backlight boost inverter shuts off when the raw PWM duty cycle
+drops below 48 (approx 1.17% on 12-bit 0..4095 scale at 25.39 kHz).
+Dropping below this threshold causes 0-nit display blackout when the user drags
+the brightness slider to 0% or ambient light drops to zero.
+
+Clamp brightness in both backlight_device_set_brightness() (sysfs & framework entry)
+and pwm_backlight_update_status() to ensure that active panel brightness (brightness > 0)
+never drops below 48, while still allowing brightness == 0 for display suspend / blanking.
+
+Signed-off-by: BangerSoul <bangersoul@antigravity.local>
+---
+ drivers/video/backlight/backlight.c | 4 ++++
+ drivers/video/backlight/pwm_bl.c    | 4 ++++
+ 2 files changed, 8 insertions(+)
+
+diff --git a/drivers/video/backlight/backlight.c b/drivers/video/backlight/backlight.c
+index 8e48b89d4..663674b01 100644
+--- a/drivers/video/backlight/backlight.c
++++ b/drivers/video/backlight/backlight.c
+@@ -351,6 +351,10 @@ int backlight_device_set_brightness(struct backlight_device *bd,
+ 		if (brightness > bd->props.max_brightness)
+ 			rc = -EINVAL;
+ 		else {
++			/* Clamp active PWM to floor >= 48 to prevent panel strike drop / 0-nit blackout */
++			if (brightness > 0 && brightness < 48)
++				brightness = 48;
++
+ 			pr_debug("set brightness to %lu\n", brightness);
+ 			bd->props.brightness = brightness;
+ 			rc = backlight_update_status(bd);
+diff --git a/drivers/video/backlight/pwm_bl.c b/drivers/video/backlight/pwm_bl.c
+index 235f3dfd6..831a29381 100644
+--- a/drivers/video/backlight/pwm_bl.c
++++ b/drivers/video/backlight/pwm_bl.c
+@@ -118,6 +118,10 @@ static int pwm_backlight_update_status(struct backlight_device *bd)
+ 	int brightness = backlight_get_effective_brightness(bd);
+ 	struct pwm_state state;
+ 
++	/* Enforce hardware PWM duty cycle floor >= 48 (12-bit register scale) */
++	if (brightness > 0 && brightness < 48)
++		brightness = 48;
++
+ 	if (pb->notify)
+ 		brightness = pb->notify(pb->dev, brightness);
+ 
+-- 
+2.43.0

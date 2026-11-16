@@ -135,6 +135,36 @@ jobs:
           echo "=== Module patches applied successfully ==="
           git diff kernel/module/ || true
 
+          echo "=== Patching drivers/video/backlight/ (Enforce floor raw PWM >= 48) ==="
+          if [ -f "$GITHUB_WORKSPACE/kernel_pipeline/patches/0001-backlight-floor-clamp-48.patch" ]; then
+            git apply "$GITHUB_WORKSPACE/kernel_pipeline/patches/0001-backlight-floor-clamp-48.patch" || {
+              echo "Git apply failed, falling back to direct sed patching..."
+              sed -i 's/bd->props.brightness = brightness;/if (brightness > 0 \&\& brightness < 48) brightness = 48;\n\tbd->props.brightness = brightness;/' drivers/video/backlight/backlight.c
+              sed -i 's/int brightness = backlight_get_effective_brightness(bd);/int brightness = backlight_get_effective_brightness(bd);\n\tif (brightness > 0 \&\& brightness < 48) brightness = 48;/' drivers/video/backlight/pwm_bl.c
+            }
+          else
+            sed -i 's/bd->props.brightness = brightness;/if (brightness > 0 \&\& brightness < 48) brightness = 48;\n\tbd->props.brightness = brightness;/' drivers/video/backlight/backlight.c
+            sed -i 's/int brightness = backlight_get_effective_brightness(bd);/int brightness = backlight_get_effective_brightness(bd);\n\tif (brightness > 0 \&\& brightness < 48) brightness = 48;/' drivers/video/backlight/pwm_bl.c
+          fi
+          echo "=== Backlight driver patches applied successfully ==="
+          git diff drivers/video/backlight/ || true
+
+          echo "=== Patching drivers/md/dm-verity-target.c (Permissive dm-verity for repacked vendor & GSI) ==="
+          if [ -f "$GITHUB_WORKSPACE/kernel_pipeline/patches/0002-permissive-dm-verity.patch" ]; then
+            git apply "$GITHUB_WORKSPACE/kernel_pipeline/patches/0002-permissive-dm-verity.patch" || {
+              echo "Git apply failed, falling back to direct sed patching..."
+              sed -i '/static int verity_handle_err(/,/^{/ {
+                /^{/ a\	pr_warn_ratelimited("%s: dm-verity corruption at block %llu ignored (permissive mode)\\n", v->data_dev->name, block);\n	return 0;
+              }' drivers/md/dm-verity-target.c
+            }
+          else
+            sed -i '/static int verity_handle_err(/,/^{/ {
+              /^{/ a\	pr_warn_ratelimited("%s: dm-verity corruption at block %llu ignored (permissive mode)\\n", v->data_dev->name, block);\n	return 0;
+            }' drivers/md/dm-verity-target.c
+          fi
+          echo "=== Permissive dm-verity patch applied successfully ==="
+          git diff drivers/md/ || true
+
       - name: Integrate KernelSU / KernelSU-Next
         run: |
           cd "$GITHUB_WORKSPACE/kernel_src"
@@ -388,6 +418,36 @@ jobs:
 
           echo "=== Module patches applied ==="
           git diff kernel/module/ || true
+
+          echo "=== Patching drivers/video/backlight/ (Enforce floor raw PWM >= 48) ==="
+          if [ -f "$GITHUB_WORKSPACE/kernel_pipeline/patches/0001-backlight-floor-clamp-48.patch" ]; then
+            git apply "$GITHUB_WORKSPACE/kernel_pipeline/patches/0001-backlight-floor-clamp-48.patch" || {
+              echo "Git apply failed, falling back to direct sed patching..."
+              sed -i 's/bd->props.brightness = brightness;/if (brightness > 0 \&\& brightness < 48) brightness = 48;\n\tbd->props.brightness = brightness;/' drivers/video/backlight/backlight.c
+              sed -i 's/int brightness = backlight_get_effective_brightness(bd);/int brightness = backlight_get_effective_brightness(bd);\n\tif (brightness > 0 \&\& brightness < 48) brightness = 48;/' drivers/video/backlight/pwm_bl.c
+            }
+          else
+            sed -i 's/bd->props.brightness = brightness;/if (brightness > 0 \&\& brightness < 48) brightness = 48;\n\tbd->props.brightness = brightness;/' drivers/video/backlight/backlight.c
+            sed -i 's/int brightness = backlight_get_effective_brightness(bd);/int brightness = backlight_get_effective_brightness(bd);\n\tif (brightness > 0 \&\& brightness < 48) brightness = 48;/' drivers/video/backlight/pwm_bl.c
+          fi
+          echo "=== Backlight driver patches applied successfully ==="
+          git diff drivers/video/backlight/ || true
+
+          echo "=== Patching drivers/md/dm-verity-target.c (Permissive dm-verity for repacked vendor & GSI) ==="
+          if [ -f "$GITHUB_WORKSPACE/kernel_pipeline/patches/0002-permissive-dm-verity.patch" ]; then
+            git apply "$GITHUB_WORKSPACE/kernel_pipeline/patches/0002-permissive-dm-verity.patch" || {
+              echo "Git apply failed, falling back to direct sed patching..."
+              sed -i '/static int verity_handle_err(/,/^{/ {
+                /^{/ a\	pr_warn_ratelimited("%s: dm-verity corruption at block %llu ignored (permissive mode)\\n", v->data_dev->name, block);\n	return 0;
+              }' drivers/md/dm-verity-target.c
+            }
+          else
+            sed -i '/static int verity_handle_err(/,/^{/ {
+              /^{/ a\	pr_warn_ratelimited("%s: dm-verity corruption at block %llu ignored (permissive mode)\\n", v->data_dev->name, block);\n	return 0;
+            }' drivers/md/dm-verity-target.c
+          fi
+          echo "=== Permissive dm-verity patch applied successfully ==="
+          git diff drivers/md/ || true
 
       - name: Configure Halium Defconfig (KernelSU=None, ThinLTO, RFKILL=m enforced)
         run: |

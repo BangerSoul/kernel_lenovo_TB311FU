@@ -1,0 +1,39 @@
+From: BangerSoul <bangersoul@antigravity.local>
+Date: Mon, 16 Nov 2026 07:00:00 +0000
+Subject: [PATCH] drivers/md/dm-verity-target: Permissive dm-verity mode to ignore block corruptions
+
+On Lenovo Tab M11 (TB311FU / poplar, MediaTek Helio G88 / MT8786), factory
+root VBMeta images (stock_vbmeta.img, stock_vbmeta_vendor.img, stock_vbmeta_system.img)
+strictly enforce Merkle hashtrees with restart_on_corruption. When repacked
+vendor dynamic partitions (vendor_stabilized.img) or Generic System Images (LineageOS 23.2 GSI)
+are mounted under factory VBMeta signatures, hashtree verification detects
+divergence.
+
+Without this patch, verity_handle_err() executes kernel_restart("dm-verity device corrupted"),
+causing an immediate kernel panic reboot loop upon mounting /vendor or /system.
+
+Modify verity_handle_err() to log a rate-limited warning and return 0 (success/permissive),
+allowing modified logical partitions to mount cleanly without device restart.
+
+Signed-off-by: BangerSoul <bangersoul@antigravity.local>
+---
+ drivers/md/dm-verity-target.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/drivers/md/dm-verity-target.c b/drivers/md/dm-verity-target.c
+index 2d9a3b680..7f5c2a114 100644
+--- a/drivers/md/dm-verity-target.c
++++ b/drivers/md/dm-verity-target.c
+@@ -218,6 +218,10 @@ static int verity_handle_err(struct dm_verity *v, enum verity_block_type type,
+ 	const char *type_str = "";
+ 	struct mapped_device *md = dm_table_get_md(v->ti->table);
+ 
++	pr_warn_ratelimited("%s: dm-verity corruption at block %llu ignored (permissive mode)\n",
++			    v->data_dev->name, block);
++	return 0;
++
+ 	/* Don't flood the log with messages */
+ 	DMERR_LIMIT("%s: %s block %llu is corrupted", v->data_dev->name,
+ 		    type_str, block);
+-- 
+2.43.0
