@@ -76,7 +76,7 @@ int verity_hash(struct dm_verity *v, struct ahash_request *req,
 /*
  * Handle a verification failure.
  *
- * In permissive mode (PoplarKernel custom kernel for Lenovo Tab M11),
+ * In permissive mode (PoplarKernel custom kernel for Lenovo Tab with Clear Case (TB311FU)),
  * block corruptions are ignored and verity_handle_err returns 0,
  * allowing modified vendor_stabilized.img and LineageOS 23.2 GSI system_a
  * partitions to mount without kernel_restart("dm-verity device corrupted").

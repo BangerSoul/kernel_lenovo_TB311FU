@@ -1,18 +1,18 @@
 # kernel_lenovo_TB311FU
 
 [![License: GPL-2.0](https://img.shields.io/badge/License-GPL%202.0-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html)
-[![Target: Lenovo Tab M11](https://img.shields.io/badge/Device-Lenovo%20Tab%20M11%20(TB311FU)-orange.svg)](https://www.lenovo.com)
+[![Target: Lenovo Tab with Clear Case (TB311FU)](https://img.shields.io/badge/Device-Lenovo%20Tab%20with%20Clear%20Case%20(TB311FU)-orange.svg)](https://www.lenovo.com)
 [![Branch: main](https://img.shields.io/badge/Branch-main-success.svg)](https://github.com/BangerSoul/kernel_lenovo_TB311FU)
 [![Kernel: Linux 6.6 LTS](https://img.shields.io/badge/Kernel-Linux%206.6%20GKI%202.0-teal.svg)](https://kernel.org)
 [![Root: KernelSU-Next](https://img.shields.io/badge/Root-KernelSU--Next-violet.svg)](https://github.com/KernelSU-Next/KernelSU-Next)
 
-Downstream Linux 6.6 GKI 2.0 kernel tree defconfigs, patches, KernelSU-Next root integration, permissive dm-verity, and Little Kernel (LK) AVB 2.0 boot vector assembly suite for the **Lenovo Tab M11** (`TB311FU`, codename `poplar`, MediaTek Helio G88 / MT8786 / MT6768).
+Downstream Linux 6.6 GKI 2.0 kernel tree defconfigs, patches, KernelSU-Next root integration, permissive dm-verity, and Little Kernel (LK) AVB 2.0 boot vector assembly suite for the **Lenovo Tab with Clear Case** (`TB311FU`, codename `poplar`, MediaTek Helio G88 / MT8786 / MT6768).
 
 ---
 
-## 🌐 Lenovo Tab M11 (TB311FU / poplar) Open-Source Bringup Ecosystem
+## 🌐 Lenovo Tab with Clear Case (TB311FU / poplar) Open-Source Bringup Ecosystem
 
-The complete open-source software stack for the **Lenovo Tab M11** (`TB311FU`, codename `poplar`, MediaTek Helio G88 / MT8786 / MT6768) is organized into five specialized, interconnected repositories under [@BangerSoul](https://github.com/BangerSoul):
+The complete open-source software stack for the **Lenovo Tab with Clear Case** (`TB311FU`, codename `poplar`, MediaTek Helio G88 / MT8786 / MT6768) is organized into five specialized, interconnected repositories under [@BangerSoul](https://github.com/BangerSoul):
 
 | Repository | Role & Subsystem Scope | Target Stack | Key Deliverables & Artifacts | Badges & Links |
 | :--- | :--- | :--- | :--- | :---: |

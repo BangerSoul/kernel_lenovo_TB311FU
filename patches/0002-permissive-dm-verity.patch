@@ -2,7 +2,7 @@ From: BangerSoul <bangersoul@antigravity.local>
 Date: Mon, 16 Nov 2026 07:00:00 +0000
 Subject: [PATCH] drivers/md/dm-verity-target: Permissive dm-verity mode to ignore block corruptions
 
-On Lenovo Tab M11 (TB311FU / poplar, MediaTek Helio G88 / MT8786), factory
+On Lenovo Tab with Clear Case (TB311FU / poplar, MediaTek Helio G88 / MT8786), factory
 root VBMeta images (stock_vbmeta.img, stock_vbmeta_vendor.img, stock_vbmeta_system.img)
 strictly enforce Merkle hashtrees with restart_on_corruption. When repacked
 vendor dynamic partitions (vendor_stabilized.img) or Generic System Images (LineageOS 23.2 GSI)

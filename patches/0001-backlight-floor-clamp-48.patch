@@ -2,7 +2,7 @@ From: BangerSoul <bangersoul@antigravity.local>
 Date: Mon, 16 Nov 2026 06:30:00 +0000
 Subject: [PATCH] drivers/video/backlight: Clamp minimum hardware PWM duty cycle floor to >= 48
 
-On Lenovo Tab M11 (TB311FU / poplar, MediaTek MT8786 / Helio G88), the BOE 11.0"
+On Lenovo Tab with Clear Case (TB311FU / poplar, MediaTek MT8786 / Helio G88), the BOE 11.0"
 WUXGA IPS LCD panel backlight boost inverter shuts off when the raw PWM duty cycle
 drops below 48 (approx 1.17% on 12-bit 0..4095 scale at 25.39 kHz).
 Dropping below this threshold causes 0-nit display blackout when the user drags

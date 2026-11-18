@@ -1,4 +1,4 @@
-name: Build PoplarKernel for Lenovo Tab M11
+name: Build PoplarKernel for Lenovo Tab with Clear Case (TB311FU)
 
 on:
   push:
@@ -46,7 +46,7 @@ on:
 
 jobs:
   build:
-    name: Build PoplarKernel for Lenovo Tab M11 (TB311FU)
+    name: Build PoplarKernel for Lenovo Tab with Clear Case (TB311FU)
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -337,16 +337,16 @@ jobs:
         if: (steps.package.outcome == 'success') && (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch')
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('PoplarKernel-v1.2-{0}', steps.package.outputs.TIMESTAMP) }}
-          name: ${{ startsWith(github.ref, 'refs/tags/') && format('PoplarKernel Release {0}', github.ref_name) || format('PoplarKernel v1.2 with {0} for Lenovo Tab M11 (TB311FU)', inputs.KERNELSU_MODE || 'KernelSU-Next') }}
+          name: ${{ startsWith(github.ref, 'refs/tags/') && format('PoplarKernel Release {0}', github.ref_name) || format('PoplarKernel v1.2 with {0} for Lenovo Tab with Clear Case (TB311FU)', inputs.KERNELSU_MODE || 'KernelSU-Next') }}
           body: |
-            # 🌲 PoplarKernel for Lenovo Tab M11 (TB311FU)
-            **High-Performance Downstream Linux 6.6 Kernel for Lenovo Tab M11 (`TB311FU` / `poplar`)!**
+            # 🌲 PoplarKernel for Lenovo Tab with Clear Case (TB311FU)
+            **High-Performance Downstream Linux 6.6 Kernel for Lenovo Tab with Clear Case (`TB311FU` / `poplar`)!**
 
             ---
 
             ### 🚀 Specifications & Features
             - **Developer / Maintainer:** @BangerSoul
-            - **Target Device:** Lenovo Tab M11 (`TB311FU` / `poplar`)
+            - **Target Device:** Lenovo Tab with Clear Case (`TB311FU` / `poplar`)
             - **SoC:** MediaTek MT8786 / MT6769 (Helio G88)
             - **Linux Kernel Base:** Android 15 GKI Linux `6.6.82` (`android15-6.6-2025-04_r18`)
             - **Root Solution:** Integrated **KernelSU-Next** (SELinux Enforcing, full superuser authority)
@@ -654,9 +654,9 @@ jobs:
         if: steps.halium_package.outcome == 'success' && (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch')
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('halium-kernel-{0}', steps.halium_package.outputs.TIMESTAMP) }}
-          name: ${{ startsWith(github.ref, 'refs/tags/') && format('Halium Kernel Release {0}', github.ref_name) || format('Halium Kernel for Ubuntu Touch — Lenovo Tab M11 (TB311FU) [{0}]', steps.halium_package.outputs.TIMESTAMP) }}
+          name: ${{ startsWith(github.ref, 'refs/tags/') && format('Halium Kernel Release {0}', github.ref_name) || format('Halium Kernel for Ubuntu Touch — Lenovo Tab with Clear Case (TB311FU) [{0}]', steps.halium_package.outputs.TIMESTAMP) }}
           body: |
-            # 🐧 Halium Ubuntu Touch Kernel for Lenovo Tab M11 (TB311FU)
+            # 🐧 Halium Ubuntu Touch Kernel for Lenovo Tab with Clear Case (TB311FU)
 
             GKI Linux 6.6 kernel built with `halium_tb311fu_defconfig` for Ubuntu Touch / UBports deployment.
             Compiled with upstream LLVM toolchain (pinned 20261118).

@@ -1,10 +1,10 @@
-### AnyKernel3 Script for Lenovo Tab M11 (TB311FU / poplar / MT6769)
+### AnyKernel3 Script for Lenovo Tab with Clear Case (TB311FU / poplar / MT6769)
 # PoplarKernel v1.2 by BangerSoul
 # Built with KernelSU-Next, Native Wi-Fi & Full Android 15 GSI Compatibility
 
 ### Properties
 properties() { '
-kernel.string=PoplarKernel v1.2 with KernelSU-Next for Lenovo Tab M11 (TB311FU) by BangerSoul
+kernel.string=PoplarKernel v1.2 with KernelSU-Next for Lenovo Tab with Clear Case (TB311FU) by BangerSoul
 do.devicecheck=1
 do.modules=0
 do.systemless=1
@@ -38,7 +38,7 @@ fi;
 
 ui_print " ";
 ui_print "==========================================";
-ui_print "       PoplarKernel v1.2 for Tab M11      ";
+ui_print " PoplarKernel v1.2 for Lenovo Tab with Clear Case ";
 ui_print "           Developer: BangerSoul          ";
 ui_print "        KernelSU-Next | Linux 6.6         ";
 ui_print "      Native Wi-Fi & Module Bypass        ";

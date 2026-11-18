@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 boot_vector/verify_lk_avb_invariant.py - Little Kernel (LK) AVB Invariant Cryptographic Validator
-PostmarketOS / Alpine ARM64 with Plasma Mobile on Lenovo Tab M11 (TB311FU / poplar)
+PostmarketOS / Alpine ARM64 with Plasma Mobile on Lenovo Tab with Clear Case (TB311FU / poplar)
 
 Cryptographically audits and verifies that an Android Boot Header v4 image strictly satisfies
 the MediaTek Little Kernel (LK) Android Verified Boot (AVB) 2.0 invariants:

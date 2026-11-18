@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# scripts/repack_boot.sh - Android Boot Image Repacker for Lenovo Tab M11
-# Target: Lenovo Tab M11 (TB311FU / poplar, MediaTek MT8786 / MT6768 / MT6769)
+# scripts/repack_boot.sh - Android Boot Image Repacker for Lenovo Tab with Clear Case (TB311FU)
+# Target: Lenovo Tab with Clear Case (TB311FU) (TB311FU / poplar, MediaTek MT8786 / MT6768 / MT6769)
 # Supports: Android Boot Header v2, v3, v4 (GKI 2.0)
 # Backends: magiskboot, mkbootimg/unpack_bootimg, and built-in Python fallback
 # ==============================================================================
@@ -11,7 +11,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# Geometry constants for Lenovo Tab M11 (poplar / tb8786p1_64_k66)
+# Geometry constants for Lenovo Tab with Clear Case (poplar / tb8786p1_64_k66)
 EXPECTED_BOOT_SIZE=33554432       # 32 MB
 VBMETA_OFFSET=14561280            # 0xDE3000
 VBMETA_SIZE=2432                  # Pristine OEM VBMeta block size
@@ -45,7 +45,7 @@ Optional arguments:
   -o, --output <path>     Output repacked boot image path (default: boot_repacked.img)
   -t, --tool <backend>    Repack backend: auto (default), magiskboot, mkbootimg, python
   -c, --cmdline <string>  Override or append kernel command line
-      --pad-32m           Enforce 32MB padding for Lenovo Tab M11 boot partition
+      --pad-32m           Enforce 32MB padding for Lenovo Tab with Clear Case (TB311FU) boot partition
       --no-pad            Do not pad output image
       --avb-align         Preserve OEM VBMeta block at 14,561,280 and AVB footer
   -v, --verbose           Enable verbose diagnostic logs
@@ -183,7 +183,7 @@ fi
 # Auto-detect 32MB padding requirement
 if [[ "${PAD_32M}" == "auto" ]]; then
     if [[ "${ORIG_SIZE}" -eq "${EXPECTED_BOOT_SIZE}" ]]; then
-        log_info "Detected 32MB boot partition (Lenovo Tab M11 geometry). Enabling 32MB padding and LK AVB alignment."
+        log_info "Detected 32MB boot partition (Lenovo Tab with Clear Case (TB311FU) geometry). Enabling 32MB padding and LK AVB alignment."
         PAD_32M="true"
         if [[ "${AVB_ALIGN}" == "auto" ]]; then
             AVB_ALIGN="true"
@@ -486,9 +486,9 @@ fi
 RAW_SIZE=$(stat -c%s "repacked_raw.img")
 log_info "Raw repacked boot image size: ${RAW_SIZE} bytes"
 
-# Handle Lenovo Tab M11 LK AVB 2.0 Invariant & 32MB Padding
+# Handle Lenovo Tab with Clear Case (TB311FU) LK AVB 2.0 Invariant & 32MB Padding
 if [[ "${PAD_32M}" == "true" ]]; then
-    log_info "Enforcing 32MB boot vector alignment (Lenovo Tab M11 AVB 2.0 Invariant)..."
+    log_info "Enforcing 32MB boot vector alignment (Lenovo Tab with Clear Case (TB311FU) AVB 2.0 Invariant)..."
 
     python3 - << 'PYEOF' "${ABS_BOOT_IMG}" "repacked_raw.img" "${ABS_OUTPUT}" "${AVB_ALIGN}"
 import sys

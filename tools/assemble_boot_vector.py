@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 boot_vector/assemble_pmos_boot.py - Android Boot Header v4 Boot Vector Assembler
-PostmarketOS / Alpine ARM64 with Plasma Mobile on Lenovo Tab M11 (TB311FU / poplar)
+PostmarketOS / Alpine ARM64 with Plasma Mobile on Lenovo Tab with Clear Case (TB311FU / poplar)
 
 Assembles the 32 MB (33,554,432 bytes) Android Boot Header v4 boot vector for PostmarketOS,
 strictly enforcing the Little Kernel (LK) Android Verified Boot (AVB) 2.0 invariant:
@@ -320,7 +320,7 @@ def assemble_pmos_boot(
     """
     if verbose:
         print("==================================================================")
-        print(" [PMOS BOOT VECTOR ASSEMBLER] Lenovo Tab M11 (TB311FU / poplar)")
+        print(" [PMOS BOOT VECTOR ASSEMBLER] Lenovo Tab with Clear Case (TB311FU / poplar)")
         print("==================================================================")
 
     # 1. Extract Kernel Payload
@@ -419,7 +419,7 @@ def assemble_pmos_boot(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Assemble Android Boot Header v4 pmos_boot.img for Lenovo Tab M11 honoring LK AVB invariants."
+        description="Assemble Android Boot Header v4 pmos_boot.img for Lenovo Tab with Clear Case (TB311FU) honoring LK AVB invariants."
     )
     parser.add_argument(
         "-k", "--kernel",
