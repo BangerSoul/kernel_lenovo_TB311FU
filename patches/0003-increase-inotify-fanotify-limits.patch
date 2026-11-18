@@ -1,0 +1,61 @@
+From: BangerSoul <bangersoul@antigravity.local>
+Date: Wed, 18 Nov 2026 12:00:00 +0000
+Subject: [PATCH] fs/notify: Increase default inotify and fanotify user limits
+
+On Android and modern desktop/mobile distributions (Halium, LineageOS GSI,
+PostmarketOS), default inotify and fanotify quotas (8192 watches, 128 instances)
+are quickly exhausted by background daemons, system services, indexers, and IDEs.
+This causes "ENOSPC: System limit for number of file watchers reached" errors.
+
+Increase default inotify limits:
+- inotify max_user_watches: 8192 -> 1048576
+- inotify max_user_instances: 128 -> 1024
+- inotify max_queued_events: 16384 -> 32768
+
+Increase default fanotify limits:
+- fanotify default max_events: 16384 -> 32768
+- fanotify default max_marks: 8192 -> 65536
+- fanotify default max_listeners: 128 -> 1024
+
+Signed-off-by: BangerSoul <bangersoul@antigravity.local>
+---
+ fs/notify/inotify/inotify_user.c   | 6 +++---
+ fs/notify/fanotify/fanotify_user.c | 6 +++---
+ 2 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/fs/notify/inotify/inotify_user.c b/fs/notify/inotify/inotify_user.c
+index 8e30b62..c839d10 100644
+--- a/fs/notify/inotify/inotify_user.c
++++ b/fs/notify/inotify/inotify_user.c
+@@ -38,9 +38,9 @@
+ #include <asm/ioctls.h>
+ 
+ /* these are configurable via /proc/sys/fs/inotify/ */
+-#define INOTIFY_SYSCTL_MAX_QUEUED_EVENTS	16384
+-#define INOTIFY_SYSCTL_MAX_USER_INSTANCES	128
+-#define INOTIFY_SYSCTL_MAX_USER_WATCHES	8192
++#define INOTIFY_SYSCTL_MAX_QUEUED_EVENTS	32768
++#define INOTIFY_SYSCTL_MAX_USER_INSTANCES	1024
++#define INOTIFY_SYSCTL_MAX_USER_WATCHES	1048576
+ 
+ static struct kmem_cache *inotify_inode_mark_cachep __read_mostly;
+ 
+diff --git a/fs/notify/fanotify/fanotify_user.c b/fs/notify/fanotify/fanotify_user.c
+index a1f1854..f729b28 100644
+--- a/fs/notify/fanotify/fanotify_user.c
++++ b/fs/notify/fanotify/fanotify_user.c
+@@ -29,9 +29,9 @@
+ 
+ #include "fanotify.h"
+ 
+-#define FANOTIFY_DEFAULT_MAX_EVENTS	16384
+-#define FANOTIFY_DEFAULT_MAX_MARKS	8192
+-#define FANOTIFY_DEFAULT_MAX_LISTENERS	128
++#define FANOTIFY_DEFAULT_MAX_EVENTS	32768
++#define FANOTIFY_DEFAULT_MAX_MARKS	65536
++#define FANOTIFY_DEFAULT_MAX_LISTENERS	1024
+ 
+ /*
+  * Notification groups are limited to FANOTIFY_DEFAULT_MAX_LISTENERS groups
+-- 
+2.43.0

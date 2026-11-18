@@ -26,10 +26,18 @@ The complete open-source software stack for the **Lenovo Tab M11** (`TB311FU`, c
 
 ## Highlights & Scope
 
-- **Linux 6.6 Downstream / GKI 2.0 Defconfigs:**
+- **Linux 6.6 Downstream / GKI 2.0 Defconfigs & Performance Tuning:**
   - `tb311fu_defconfig`: PoplarKernel Android 15/16 GKI 2.0 tree with `CONFIG_RFKILL=m` to satisfy MediaTek `modules.dep` vendor module loading (`wlan_drv_gen4m_6768.ko`).
   - `halium_tb311fu_defconfig`: Dedicated defconfig tailored for Ubuntu Touch / Halium and PostmarketOS environments (ThinLTO enabled, `CONFIG_TRIM_UNUSED_KSYMS=n`).
+  - **CPU Governor:** `schedutil` default, Energy Model (`CONFIG_ENERGY_MODEL=y`), CPUFreq DT & MediaTek scaling drivers enabled.
+  - **I/O Scheduler:** `mq-deadline` default, BFQ (`CONFIG_IOSCHED_BFQ=y`), Kyber (`CONFIG_MQ_IOSCHED_KYBER=y`).
+  - **TCP Congestion Control:** BBR default (`CONFIG_TCP_CONG_BBR=y`, `CONFIG_DEFAULT_BBR=y`), FQ, FQ-CoDel packet schedulers.
+  - **Memory & Swap:** zRAM with default LZ4 compression, `zsmalloc` built-in, `zswap` writeback cache enabled (`CONFIG_ZSWAP=y`).
+  - **Filesystems:** F2FS with compression, exFAT, NTFS3 read/write support (`CONFIG_NTFS3_FS=y`).
+  - **System Limits & Stripping:** Default inotify/fanotify watcher and instance quotas increased, debug symbols and KASAN stripped for minimal memory overhead and peak throughput.
   - LCD panel driver patches and EVDI DRM support.
+- **Kernel Boot Repacking & AVB Suite:**
+  - `scripts/repack_boot.sh`: Universal boot image repacker supporting `magiskboot`, `mkbootimg`, and built-in Python engine with automatic 32MB MediaTek LK AVB alignment.
 - **KernelSU-Next Integration:**
   - KernelSU-Next native syscall hooks integrated into the GKI kernel image for non-intrusive root authority.
 - **Module Signature Bypass & Permissive dm-verity:**

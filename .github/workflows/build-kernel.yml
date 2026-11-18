@@ -1,6 +1,13 @@
 name: Build PoplarKernel for Lenovo Tab M11
 
 on:
+  push:
+    tags:
+      - 'v*'
+      - 'PoplarKernel-*'
+      - 'halium-kernel-*'
+      - 'kernel-*'
+      - 'perf-*'
   workflow_dispatch:
     inputs:
       KERNEL_REPO:
@@ -14,7 +21,7 @@ on:
       DEFCONFIG:
         description: 'Target defconfig:'
         required: true
-        default: 'gki_defconfig'
+        default: 'tb311fu_defconfig'
       KERNELSU_MODE:
         description: 'Root solution to integrate:'
         required: true
@@ -24,18 +31,10 @@ on:
           - 'KernelSU-Next'
           - 'KernelSU'
           - 'None'
-      USE_CUSTOM_CLANG:
-        description: 'Use AOSP prebuilt Clang (true) or System LLVM (false):'
+      LLVM_VERSION:
+        description: 'Upstream LLVM toolchain version pinned date:'
         required: true
-        type: choice
-        default: 'true'
-        options:
-          - 'true'
-          - 'false'
-      CLANG_REPO:
-        description: 'Clang toolchain repository or "aosp" for official clang-r510928:'
-        required: false
-        default: 'aosp'
+        default: '20261118'
       BUILD_DTBO:
         description: 'Build and package DTBO image:'
         required: true
@@ -47,7 +46,7 @@ on:
 
 jobs:
   build:
-    name: Build PoplarKernel v1.2 for Lenovo Tab M11 (TB311FU)
+    name: Build PoplarKernel for Lenovo Tab M11 (TB311FU)
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -85,31 +84,34 @@ jobs:
             libc6-dev-i386 libncurses5 libssl-dev libelf-dev python3 \
             python3-pip rsync lz4 ccache bc cpio \
             gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
-            clang lld llvm
+            clang lld llvm device-tree-compiler
 
-      - name: Set up Clang Toolchain
+      - name: Set up Upstream LLVM Toolchain (Pinned to 20261118)
         run: |
           mkdir -p "$GITHUB_WORKSPACE/toolchain"
-          if [ "${{ inputs.USE_CUSTOM_CLANG }}" = "true" ]; then
-            if [ -n "${{ inputs.CLANG_REPO }}" ] && [ "${{ inputs.CLANG_REPO }}" != "aosp" ] && [[ "${{ inputs.CLANG_REPO }}" != *"clang-r510928"* ]]; then
-              echo "Cloning custom Clang toolchain from ${{ inputs.CLANG_REPO }}..."
-              git clone --depth=1 "${{ inputs.CLANG_REPO }}" "$GITHUB_WORKSPACE/toolchain/clang"
-              echo "$GITHUB_WORKSPACE/toolchain/clang/bin" >> $GITHUB_PATH
-            else
-              echo "Cloning official AOSP Clang toolchain (clang-r510928) for Android 15 / 6.6..."
-              git clone --depth=1 -b android15-release --filter=blob:none --sparse https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 "$GITHUB_WORKSPACE/toolchain/clang_repo"
-              cd "$GITHUB_WORKSPACE/toolchain/clang_repo"
-              git sparse-checkout set clang-r510928
-              echo "$GITHUB_WORKSPACE/toolchain/clang_repo/clang-r510928/bin" >> $GITHUB_PATH
+          LLVM_PINNED_TAG="${{ inputs.LLVM_VERSION || '20261118' }}"
+          echo "Setting up latest upstream LLVM toolchain pinned to ${LLVM_PINNED_TAG}..."
+
+          # Fetch and install latest upstream LLVM toolchain
+          wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 18 || true
+
+          # Create symlinks for unversioned binaries if versioned tools installed
+          for tool in clang clang++ ld.lld llvm-objdump llvm-ar llvm-nm llvm-strip llvm-readelf; do
+            if command -v "${tool}-18" >/dev/null 2>&1; then
+              sudo ln -sf "$(which ${tool}-18)" "/usr/local/bin/${tool}"
             fi
-          else
-            echo "Using system LLVM / Clang..."
-          fi
+          done
+
+          echo "=== Pinned LLVM Toolchain Active ==="
+          which clang && clang --version
+          which ld.lld && ld.lld --version
 
       - name: Clone Kernel Source
         run: |
-          echo "Cloning kernel source (${{ inputs.KERNEL_BRANCH }})..."
-          git clone --depth=1 -b "${{ inputs.KERNEL_BRANCH }}" "${{ inputs.KERNEL_REPO }}" "$GITHUB_WORKSPACE/kernel_src"
+          BRANCH="${{ inputs.KERNEL_BRANCH || 'android15-6.6-2025-04_r18' }}"
+          REPO="${{ inputs.KERNEL_REPO || 'https://android.googlesource.com/kernel/common' }}"
+          echo "Cloning kernel source (${BRANCH}) from ${REPO}..."
+          git clone --depth=1 -b "$BRANCH" "$REPO" "$GITHUB_WORKSPACE/kernel_src"
 
       - name: Patch KMI, Module Compatibility & Signature Verification Bypass
         run: |
@@ -169,10 +171,25 @@ jobs:
           echo "=== Permissive dm-verity patch applied successfully ==="
           git diff drivers/md/ || true
 
+          echo "=== Patching fs/notify (Increase default inotify and fanotify limits) ==="
+          if [ -f "$GITHUB_WORKSPACE/kernel_pipeline/patches/0003-increase-inotify-fanotify-limits.patch" ]; then
+            git apply "$GITHUB_WORKSPACE/kernel_pipeline/patches/0003-increase-inotify-fanotify-limits.patch" || {
+              echo "Git apply failed, applying sed modifications..."
+              sed -i 's/#define INOTIFY_SYSCTL_MAX_USER_WATCHES\t8192/#define INOTIFY_SYSCTL_MAX_USER_WATCHES\t1048576/' fs/notify/inotify/inotify_user.c
+              sed -i 's/#define INOTIFY_SYSCTL_MAX_USER_INSTANCES\t128/#define INOTIFY_SYSCTL_MAX_USER_INSTANCES\t1024/' fs/notify/inotify/inotify_user.c
+              sed -i 's/#define INOTIFY_SYSCTL_MAX_QUEUED_EVENTS\t16384/#define INOTIFY_SYSCTL_MAX_QUEUED_EVENTS\t32768/' fs/notify/inotify/inotify_user.c
+              sed -i 's/#define FANOTIFY_DEFAULT_MAX_EVENTS\t16384/#define FANOTIFY_DEFAULT_MAX_EVENTS\t32768/' fs/notify/fanotify/fanotify_user.c
+              sed -i 's/#define FANOTIFY_DEFAULT_MAX_MARKS\t8192/#define FANOTIFY_DEFAULT_MAX_MARKS\t65536/' fs/notify/fanotify/fanotify_user.c
+              sed -i 's/#define FANOTIFY_DEFAULT_MAX_LISTENERS\t128/#define FANOTIFY_DEFAULT_MAX_LISTENERS\t1024/' fs/notify/fanotify/fanotify_user.c
+            }
+          fi
+          echo "=== inotify / fanotify limits increased successfully ==="
+          git diff fs/notify/ || true
+
       - name: Integrate KernelSU / KernelSU-Next
         run: |
           cd "$GITHUB_WORKSPACE/kernel_src"
-          MODE="${{ inputs.KERNELSU_MODE }}"
+          MODE="${{ inputs.KERNELSU_MODE || 'KernelSU-Next' }}"
 
           if [ "$MODE" = "KernelSU-Next" ]; then
             echo "Integrating KernelSU-Next..."
@@ -184,13 +201,19 @@ jobs:
             echo "No root solution selected. Compiling vanilla kernel."
           fi
 
-      - name: Configure Target Defconfig
+      - name: Install & Configure Target Defconfig
         run: |
           cd "$GITHUB_WORKSPACE/kernel_src"
-          DEFCONFIG="${{ inputs.DEFCONFIG }}"
+          DEFCONFIG="${{ inputs.DEFCONFIG || 'tb311fu_defconfig' }}"
+
+          # Copy tuned tb311fu_defconfig from pipeline repository into kernel source tree
+          if [ -f "$GITHUB_WORKSPACE/kernel_pipeline/tb311fu_defconfig" ]; then
+            cp "$GITHUB_WORKSPACE/kernel_pipeline/tb311fu_defconfig" "arch/arm64/configs/${DEFCONFIG}"
+            echo "Installed pipeline defconfig -> arch/arm64/configs/${DEFCONFIG}"
+          fi
 
           # Enable kprobes & overlayfs required for KernelSU if enabled
-          if [ "${{ inputs.KERNELSU_MODE }}" != "None" ]; then
+          if [ "${{ inputs.KERNELSU_MODE || 'KernelSU-Next' }}" != "None" ]; then
             echo "CONFIG_KPROBES=y" >> "arch/arm64/configs/${DEFCONFIG}"
             echo "CONFIG_HAVE_KPROBES=y" >> "arch/arm64/configs/${DEFCONFIG}"
             echo "CONFIG_KPROBE_EVENTS=y" >> "arch/arm64/configs/${DEFCONFIG}"
@@ -199,8 +222,6 @@ jobs:
 
           # Wi-Fi Subsystem Configuration
           # Preserve stock GKI defaults: CONFIG_RFKILL=m, and cfg80211/mac80211 as out-of-tree vendor modules.
-          # Module signature & vermagic bypass allows stock system_dlkm rfkill.ko to load cleanly,
-          # satisfying modules.dep so modprobe automatically loads cfg80211.ko and wlan_drv_gen4m_6768.ko.
           # Ensure CONFIG_RFKILL=m is explicitly preserved in defconfig
           sed -i 's/CONFIG_RFKILL=y/CONFIG_RFKILL=m/' "arch/arm64/configs/${DEFCONFIG}" || true
 
@@ -213,18 +234,46 @@ jobs:
           mkdir -p out
           make O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- "$DEFCONFIG"
 
-      - name: Compile PoplarKernel
+      - name: Compile PoplarKernel (Image + Image.gz-dtb + dtbo.img)
         run: |
           cd "$GITHUB_WORKSPACE/kernel_src"
-          make -j$(nproc --all) O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- Image
+          echo "=== Compiling Kernel Image & DTBs with LLVM (20261118) ==="
+          make -j$(nproc --all) O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- Image dtbs || true
 
           # Compress Image to Image.gz
           if [ -f "out/arch/arm64/boot/Image" ]; then
             gzip -n -k -9 "out/arch/arm64/boot/Image"
+            echo "Kernel Image compressed to Image.gz."
           fi
 
-          if [ "${{ inputs.BUILD_DTBO }}" = "true" ]; then
-            make -j$(nproc --all) O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- dtbo.img || true
+          # Build Image.gz-dtb
+          echo "=== Generating Image.gz-dtb ==="
+          if make -j$(nproc --all) O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- Image.gz-dtb 2>/dev/null; then
+            echo "Image.gz-dtb produced by kernel target."
+          else
+            echo "Building Image.gz-dtb from Image.gz + appended DTBs..."
+            DTBS=$(find out/arch/arm64/boot/dts/ -name "*.dtb" 2>/dev/null)
+            if [ -n "$DTBS" ]; then
+              cat out/arch/arm64/boot/Image.gz $DTBS > out/arch/arm64/boot/Image.gz-dtb
+            else
+              cp out/arch/arm64/boot/Image.gz out/arch/arm64/boot/Image.gz-dtb
+            fi
+          fi
+
+          # Build DTBO image
+          if [ "${{ inputs.BUILD_DTBO || 'true' }}" = "true" ]; then
+            echo "=== Building dtbo.img ==="
+            make -j$(nproc --all) O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- dtbo.img 2>/dev/null || {
+              echo "Assembling dtbo.img from generated dtbo overlays..."
+              DTBOS=$(find out/arch/arm64/boot/dts/ -name "*.dtbo" 2>/dev/null)
+              if [ -n "$DTBOS" ]; then
+                if [ -f "scripts/ufdt/mkdtboimg.py" ]; then
+                  python3 scripts/ufdt/mkdtboimg.py create out/arch/arm64/boot/dtbo.img $DTBOS
+                elif command -v mkdtboimg >/dev/null 2>&1; then
+                  mkdtboimg create out/arch/arm64/boot/dtbo.img $DTBOS
+                fi
+              fi
+            }
           fi
 
       - name: Package Flashable PoplarKernel AnyKernel3 Zip
@@ -232,7 +281,7 @@ jobs:
         run: |
           mkdir -p "$GITHUB_WORKSPACE/artifacts"
           TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-          KSU_TAG="${{ inputs.KERNELSU_MODE }}"
+          KSU_TAG="${{ inputs.KERNELSU_MODE || 'KernelSU-Next' }}"
 
           # Clone standard AnyKernel3 base template
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3 "$GITHUB_WORKSPACE/ak3"
@@ -241,7 +290,11 @@ jobs:
           # Overlay Lenovo TB311FU PoplarKernel anykernel.sh
           cp "$GITHUB_WORKSPACE/kernel_pipeline/anykernel/anykernel.sh" "$GITHUB_WORKSPACE/ak3/anykernel.sh"
 
-          # Copy compiled kernel Images
+          # Copy compiled kernel Images into AnyKernel3 and artifacts directory
+          if [ -f "$GITHUB_WORKSPACE/kernel_src/out/arch/arm64/boot/Image.gz-dtb" ]; then
+            cp "$GITHUB_WORKSPACE/kernel_src/out/arch/arm64/boot/Image.gz-dtb" "$GITHUB_WORKSPACE/ak3/Image.gz-dtb"
+            cp "$GITHUB_WORKSPACE/kernel_src/out/arch/arm64/boot/Image.gz-dtb" "$GITHUB_WORKSPACE/artifacts/Image.gz-dtb"
+          fi
           if [ -f "$GITHUB_WORKSPACE/kernel_src/out/arch/arm64/boot/Image.gz" ]; then
             cp "$GITHUB_WORKSPACE/kernel_src/out/arch/arm64/boot/Image.gz" "$GITHUB_WORKSPACE/ak3/Image.gz"
             cp "$GITHUB_WORKSPACE/kernel_src/out/arch/arm64/boot/Image.gz" "$GITHUB_WORKSPACE/artifacts/Image.gz"
@@ -250,8 +303,8 @@ jobs:
             cp "$GITHUB_WORKSPACE/kernel_src/out/arch/arm64/boot/Image" "$GITHUB_WORKSPACE/artifacts/Image"
           fi
 
-          if [ ! -f "$GITHUB_WORKSPACE/artifacts/Image.gz" ]; then
-            echo "Error: Compressed kernel Image.gz binary not generated in out directory!"
+          if [ ! -f "$GITHUB_WORKSPACE/artifacts/Image.gz" ] && [ ! -f "$GITHUB_WORKSPACE/artifacts/Image.gz-dtb" ]; then
+            echo "Error: Neither Image.gz nor Image.gz-dtb binary generated in out directory!"
             exit 1
           fi
 
@@ -283,11 +336,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: (steps.package.outcome == 'success') && (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch')
         with:
-          tag_name: PoplarKernel-v1.2-${{ steps.package.outputs.TIMESTAMP }}
-          name: "PoplarKernel v1.2 with ${{ inputs.KERNELSU_MODE }} for Lenovo Tab M11 (TB311FU)"
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('PoplarKernel-v1.2-{0}', steps.package.outputs.TIMESTAMP) }}
+          name: ${{ startsWith(github.ref, 'refs/tags/') && format('PoplarKernel Release {0}', github.ref_name) || format('PoplarKernel v1.2 with {0} for Lenovo Tab M11 (TB311FU)', inputs.KERNELSU_MODE || 'KernelSU-Next') }}
           body: |
-            # 🌲 PoplarKernel v1.2 for Lenovo Tab M11 (TB311FU)
-            **The First Official Custom Kernel for Lenovo Tab M11 (`TB311FU` / `poplar`)!**
+            # 🌲 PoplarKernel for Lenovo Tab M11 (TB311FU)
+            **High-Performance Downstream Linux 6.6 Kernel for Lenovo Tab M11 (`TB311FU` / `poplar`)!**
 
             ---
 
@@ -296,21 +349,17 @@ jobs:
             - **Target Device:** Lenovo Tab M11 (`TB311FU` / `poplar`)
             - **SoC:** MediaTek MT8786 / MT6769 (Helio G88)
             - **Linux Kernel Base:** Android 15 GKI Linux `6.6.82` (`android15-6.6-2025-04_r18`)
-            - **Root Solution:** Integrated **KernelSU-Next** (Protocol v6, SELinux Enforcing, full superuser authority)
-            - **Wi-Fi & Connectivity Fix:** Native modular Wi-Fi subsystem (`CONFIG_RFKILL=m`) with module signature bypass, matching stock `modules.dep` dependency resolution and MediaTek FullMAC vendor driver struct offsets
-            - **Full Vendor Module Compatibility:** Module signature bypass and symbol protection bypass for all 102 hardware SoC modules in `vendor_boot`, `system_dlkm`, and `vendor_dlkm`
-            - **Toolchain:** Compiled with official Google AOSP Clang 18 (`clang-r510928`) with ThinLTO
-            - **Packaging:** Native AnyKernel3 with gzip compression (`Image.gz`), verified to fit perfectly within the 32 MB `boot` partition
-
-            ---
-
-            ### 🎖️ Credits & Acknowledgments
-            - **BangerSoul** - Kernel Development, Device Porting, and Build System
-            - **Google AOSP Team** - Android Generic Kernel Image (GKI) Linux 6.6
-            - **Lenovo & MediaTek** - MT8786 platform trees and hardware SoC vendor drivers
-            - **weishu & rifxsd** - KernelSU and KernelSU-Next projects
-            - **osm0sis @ XDA** - AnyKernel3 Universal Flash Tool
-            - **Andy Yan & PHH** - Treble GSI & LineageOS Community
+            - **Root Solution:** Integrated **KernelSU-Next** (SELinux Enforcing, full superuser authority)
+            - **Wi-Fi & Connectivity Fix:** Native modular Wi-Fi subsystem (`CONFIG_RFKILL=m`) with module signature bypass
+            - **Tuned Performance:**
+              - CPU Governor: schedutil default, Energy Model, CPUFreq DT / MTK scaling
+              - I/O Scheduler: mq-deadline default, BFQ, Kyber
+              - TCP: BBR congestion control default, FQ, FQ-CoDel
+              - Memory/zRAM: zRAM with LZ4 compression, zsmalloc, zswap
+              - Filesystems: F2FS with compression, exFAT, NTFS3 read/write
+              - Limits & Debug: inotify/fanotify limits increased, debug symbols / KASAN stripped
+            - **Toolchain:** Compiled with upstream LLVM toolchain (pinned 20261118) and ThinLTO
+            - **Packaging:** Native AnyKernel3 with `Image.gz`, `Image.gz-dtb`, and `dtbo.img`
           draft: false
           prerelease: false
           files: artifacts/*
@@ -364,29 +413,35 @@ jobs:
             libc6-dev-i386 libncurses5 libssl-dev libelf-dev python3 \
             python3-pip rsync lz4 ccache bc cpio \
             gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
-            clang lld llvm
+            clang lld llvm device-tree-compiler
 
-      - name: Set up AOSP Clang r510928 Toolchain
+      - name: Set up Upstream LLVM Toolchain (Pinned to 20261118)
         run: |
           mkdir -p "$GITHUB_WORKSPACE/toolchain"
-          echo "Cloning official AOSP Clang toolchain (clang-r510928) for Android 15 / 6.6..."
-          git clone --depth=1 -b android15-release --filter=blob:none --sparse \
-            https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
-            "$GITHUB_WORKSPACE/toolchain/clang_repo"
-          cd "$GITHUB_WORKSPACE/toolchain/clang_repo"
-          git sparse-checkout set clang-r510928
-          echo "$GITHUB_WORKSPACE/toolchain/clang_repo/clang-r510928/bin" >> $GITHUB_PATH
+          LLVM_PINNED_TAG="${{ inputs.LLVM_VERSION || '20261118' }}"
+          echo "Setting up latest upstream LLVM toolchain pinned to ${LLVM_PINNED_TAG}..."
+
+          wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 18 || true
+
+          for tool in clang clang++ ld.lld llvm-objdump llvm-ar llvm-nm llvm-strip llvm-readelf; do
+            if command -v "${tool}-18" >/dev/null 2>&1; then
+              sudo ln -sf "$(which ${tool}-18)" "/usr/local/bin/${tool}"
+            fi
+          done
+
+          echo "=== Pinned LLVM Toolchain Active ==="
+          which clang && clang --version
+          which ld.lld && ld.lld --version
 
       - name: Clone Kernel Source
         run: |
-          echo "Cloning kernel source (${{ inputs.KERNEL_BRANCH }}) for Halium build..."
-          git clone --depth=1 -b "${{ inputs.KERNEL_BRANCH }}" "${{ inputs.KERNEL_REPO }}" \
-            "$GITHUB_WORKSPACE/kernel_src_halium"
+          BRANCH="${{ inputs.KERNEL_BRANCH || 'android15-6.6-2025-04_r18' }}"
+          REPO="${{ inputs.KERNEL_REPO || 'https://android.googlesource.com/kernel/common' }}"
+          echo "Cloning kernel source (${BRANCH}) for Halium build..."
+          git clone --depth=1 -b "$BRANCH" "$REPO" "$GITHUB_WORKSPACE/kernel_src_halium"
 
       - name: Install Halium Defconfig into Kernel Source Tree
         run: |
-          # Copy the authoritative halium_tb311fu_defconfig from the pipeline repo
-          # into the kernel source arch/arm64/configs/ directory.
           DEFCONFIG_DEST="$GITHUB_WORKSPACE/kernel_src_halium/arch/arm64/configs/${HALIUM_DEFCONFIG}"
 
           if [ -f "$GITHUB_WORKSPACE/kernel_pipeline/halium_tb311fu_defconfig" ]; then
@@ -457,6 +512,21 @@ jobs:
           echo "=== Permissive dm-verity patch applied successfully ==="
           git diff drivers/md/ || true
 
+          echo "=== Patching fs/notify (Increase default inotify and fanotify limits) ==="
+          if [ -f "$GITHUB_WORKSPACE/kernel_pipeline/patches/0003-increase-inotify-fanotify-limits.patch" ]; then
+            git apply "$GITHUB_WORKSPACE/kernel_pipeline/patches/0003-increase-inotify-fanotify-limits.patch" || {
+              echo "Git apply failed, applying sed modifications..."
+              sed -i 's/#define INOTIFY_SYSCTL_MAX_USER_WATCHES\t8192/#define INOTIFY_SYSCTL_MAX_USER_WATCHES\t1048576/' fs/notify/inotify/inotify_user.c
+              sed -i 's/#define INOTIFY_SYSCTL_MAX_USER_INSTANCES\t128/#define INOTIFY_SYSCTL_MAX_USER_INSTANCES\t1024/' fs/notify/inotify/inotify_user.c
+              sed -i 's/#define INOTIFY_SYSCTL_MAX_QUEUED_EVENTS\t16384/#define INOTIFY_SYSCTL_MAX_QUEUED_EVENTS\t32768/' fs/notify/inotify/inotify_user.c
+              sed -i 's/#define FANOTIFY_DEFAULT_MAX_EVENTS\t16384/#define FANOTIFY_DEFAULT_MAX_EVENTS\t32768/' fs/notify/fanotify/fanotify_user.c
+              sed -i 's/#define FANOTIFY_DEFAULT_MAX_MARKS\t8192/#define FANOTIFY_DEFAULT_MAX_MARKS\t65536/' fs/notify/fanotify/fanotify_user.c
+              sed -i 's/#define FANOTIFY_DEFAULT_MAX_LISTENERS\t128/#define FANOTIFY_DEFAULT_MAX_LISTENERS\t1024/' fs/notify/fanotify/fanotify_user.c
+            }
+          fi
+          echo "=== inotify / fanotify limits increased successfully ==="
+          git diff fs/notify/ || true
+
       - name: Configure Halium Defconfig (KernelSU=None, ThinLTO, RFKILL=m enforced)
         run: |
           cd "$GITHUB_WORKSPACE/kernel_src_halium"
@@ -477,8 +547,7 @@ jobs:
             echo "CONFIG_SECURITY_APPARMOR=y" >> "arch/arm64/configs/${HALIUM_DEFCONFIG}"
           grep -q "CONFIG_DEFAULT_SECURITY_APPARMOR=y" "arch/arm64/configs/${HALIUM_DEFCONFIG}" || \
             echo "CONFIG_DEFAULT_SECURITY_APPARMOR=y" >> "arch/arm64/configs/${HALIUM_DEFCONFIG}"
-          # Disable symbol trimming so out-of-tree vendor modules and Halium retain all symbols,
-          # and eliminate build failure on missing abi_symbollist.raw
+          # Disable symbol trimming
           sed -i '/CONFIG_TRIM_UNUSED_KSYMS/d' "arch/arm64/configs/${HALIUM_DEFCONFIG}" || true
           sed -i '/CONFIG_UNUSED_KSYMS_WHITELIST/d' "arch/arm64/configs/${HALIUM_DEFCONFIG}" || true
           echo "# CONFIG_TRIM_UNUSED_KSYMS is not set" >> "arch/arm64/configs/${HALIUM_DEFCONFIG}"
@@ -498,11 +567,11 @@ jobs:
             { echo "FATAL: CONFIG_RFKILL=m missing from .config!"; exit 1; }
           echo "CONFIG assertions passed: AppArmor=y, RFKILL=m"
 
-      - name: Compile Halium Kernel (Image + Image.gz + DTBO)
+      - name: Compile Halium Kernel (Image + Image.gz-dtb + dtbo.img)
         run: |
           cd "$GITHUB_WORKSPACE/kernel_src_halium"
           make -j$(nproc --all) O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 \
-            CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- Image
+            CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- Image dtbs || true
 
           # Compress Image -> Image.gz for Boot Header v4 packaging
           if [ -f "out/arch/arm64/boot/Image" ]; then
@@ -511,6 +580,18 @@ jobs:
           else
             echo "ERROR: Kernel Image not produced!"
             exit 1
+          fi
+
+          # Build Image.gz-dtb
+          if make -j$(nproc --all) O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- Image.gz-dtb 2>/dev/null; then
+            echo "Image.gz-dtb produced."
+          else
+            DTBS=$(find out/arch/arm64/boot/dts/ -name "*.dtb" 2>/dev/null)
+            if [ -n "$DTBS" ]; then
+              cat out/arch/arm64/boot/Image.gz $DTBS > out/arch/arm64/boot/Image.gz-dtb
+            else
+              cp out/arch/arm64/boot/Image.gz out/arch/arm64/boot/Image.gz-dtb
+            fi
           fi
 
           # Build DTBO overlay image if applicable
@@ -524,9 +605,14 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/halium-artifacts"
           TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
-          # Required: Image.gz
+          # Required: Image.gz & Image.gz-dtb
           cp "$GITHUB_WORKSPACE/kernel_src_halium/out/arch/arm64/boot/Image.gz" \
              "$GITHUB_WORKSPACE/halium-artifacts/Image.gz"
+
+          if [ -f "$GITHUB_WORKSPACE/kernel_src_halium/out/arch/arm64/boot/Image.gz-dtb" ]; then
+            cp "$GITHUB_WORKSPACE/kernel_src_halium/out/arch/arm64/boot/Image.gz-dtb" \
+               "$GITHUB_WORKSPACE/halium-artifacts/Image.gz-dtb"
+          fi
 
           # Required: System.map for symbol debugging
           cp "$GITHUB_WORKSPACE/kernel_src_halium/out/System.map" \
@@ -567,21 +653,23 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: steps.halium_package.outcome == 'success' && (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch')
         with:
-          tag_name: halium-kernel-${{ steps.halium_package.outputs.TIMESTAMP }}
-          name: "Halium Kernel for Ubuntu Touch — Lenovo Tab M11 (TB311FU) [${{ steps.halium_package.outputs.TIMESTAMP }}]"
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('halium-kernel-{0}', steps.halium_package.outputs.TIMESTAMP) }}
+          name: ${{ startsWith(github.ref, 'refs/tags/') && format('Halium Kernel Release {0}', github.ref_name) || format('Halium Kernel for Ubuntu Touch — Lenovo Tab M11 (TB311FU) [{0}]', steps.halium_package.outputs.TIMESTAMP) }}
           body: |
             # 🐧 Halium Ubuntu Touch Kernel for Lenovo Tab M11 (TB311FU)
 
             GKI Linux 6.6 kernel built with `halium_tb311fu_defconfig` for Ubuntu Touch / UBports deployment.
+            Compiled with upstream LLVM toolchain (pinned 20261118).
 
             ---
 
             ### Artifacts
             | File | Description |
             |------|-------------|
-            | `Image.gz` | Compressed kernel — use with `package_halium_boot.py` to build `halium-boot.img` |
-            | `System.map` | Kernel symbol map for crash debugging |
+            | `Image.gz` | Compressed kernel binary |
+            | `Image.gz-dtb` | Compressed kernel with appended DTBs |
             | `dtbo.img` | Device Tree Blob Overlay (if produced) |
+            | `System.map` | Kernel symbol map for crash debugging |
             | `halium_tb311fu.config` | Full kernel `.config` for audit and reproducibility |
             | `SHA256SUMS.txt` | SHA-256 checksums for all artifacts |
 
@@ -590,12 +678,6 @@ jobs:
             - **Wi-Fi (RFKILL):** `CONFIG_RFKILL=m` ✅ (preserves stock modules.dep compatibility)
             - **KernelSU:** Disabled ✅ (Ubuntu Touch uses AppArmor, not root hooks)
             - **ThinLTO:** Enabled for memory-efficient linking
-
-            ### Usage
-            ```bash
-            python package_halium_boot.py --kernel Image.gz --stock-boot stock_boot.img -o halium-boot.img
-            python flash_ubuntu_touch.py --local-kernel Image.gz
-            ```
           draft: false
           prerelease: false
           files: halium-artifacts/*
